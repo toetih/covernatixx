@@ -331,3 +331,25 @@ test('Auswertung mit geplanten Buchungen (Einnahmen, Ausgaben, Kreditzinsen)', (
   assert.equal(r2.income['2025-08'], 0);
   assert.equal(r2.expense['2025-07'], -2000);
 });
+
+test('Depot-CSV: Bestand und Umsätze erkennen', () => {
+  const bestand = ['Bezeichnung', 'ISIN', 'WKN', 'Stück', 'Einstandskurs', 'Einstandswert', 'Aktueller Kurs', 'Kurswert', 'Währung'];
+  const m = C.guessDepotMapping(bestand);
+  assert.equal(m.mode, 'holdings');
+  assert.deepEqual([m.name, m.isin, m.wkn, m.qty, m.costPrice, m.costValue, m.price, m.value], [0, 1, 2, 3, 4, 5, 6, 7]);
+  const ums = ['Datum', 'Transaktionsart', 'Wertpapier', 'ISIN', 'Anzahl', 'Kurs', 'Betrag', 'Gebühren', 'Steuern'];
+  const u = C.guessDepotMapping(ums);
+  assert.equal(u.mode, 'trades');
+  assert.deepEqual([u.date, u.type, u.name, u.isin, u.qty, u.price, u.amount, u.fees, u.taxes], [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.equal(C.parseTradeType('Kauf'), 'buy');
+  assert.equal(C.parseTradeType('Sparplanausführung'), 'buy');
+  assert.equal(C.parseTradeType('Verkauf'), 'sell');
+  assert.equal(C.parseTradeType('Ausschüttung'), 'dividend');
+  assert.equal(C.parseTradeType('Depoteingang'), 'in');
+  assert.equal(C.parseTradeType('Irgendwas'), null);
+  const s = baseState();
+  s.securities.push({ id: 'w', name: 'MSCI World', isin: 'IE00B4L5Y983', prices: [] });
+  assert.equal(C.findSecurity(s, 'ie00b4l5y983', '').id, 'w');
+  assert.equal(C.findSecurity(s, '', 'msci world').id, 'w');
+  assert.equal(C.findSecurity(s, 'XX', 'Anderes'), null);
+});

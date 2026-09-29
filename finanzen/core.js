@@ -1047,6 +1047,59 @@
     return true;
   }
 
+  // ---------------------------------------------------------------- Depot-CSV
+  /** Spalten eines Depot-Exports erkennen (Bestand oder Umsätze). */
+  function guessDepotMapping(header) {
+    var H = header.map(function (h) { return String(h || '').toLowerCase().trim(); });
+    function find(re, exclude) {
+      for (var i = 0; i < H.length; i++) if (re.test(H[i]) && !(exclude && exclude.test(H[i]))) return i;
+      return -1;
+    }
+    var m = {};
+    m.isin = find(/isin/);
+    m.wkn = find(/wkn/, /isin/);
+    m.name = find(/(bezeichnung|wertpapiername|wertpapier|^name$|titel|instrument|produkt|gattung|security|asset)/, /isin|wkn|depot|konto|typ|art$/);
+    m.qty = find(/(stück|stueck|stk|anzahl|menge|nominal|bestand|quantity|shares|units|anteile)/, /wert|preis|kurs|datum/);
+    m.costPrice = find(/(einstandskurs|kaufkurs|einstandspreis|ø|durchschn|avg|average|kaufpreis|einstand je|einstand \/)/, /wert$/);
+    m.costValue = find(/(einstandswert|kaufwert|anschaffungswert|anschaffungskosten|investiert|einstand)/, /kurs|preis|je st/);
+    m.price = find(/(aktueller kurs|akt\. kurs|letzter kurs|schlusskurs|^kurs|^price|kurs$|kurs \(|kurs in|marktpreis)/, /einstand|kauf|datum|wert/);
+    m.value = find(/(kurswert|marktwert|depotwert|positionswert|aktueller wert|^wert|value)/, /einstand|kauf|anschaff/);
+    m.date = find(/(datum|date|valuta|ausführung|ausfuehrung|handelstag|buchungstag|schlusstag)/, /kurs/);
+    m.type = find(/(transaktionsart|buchungsart|geschäftsart|geschaeftsart|vorgang|^typ|^art$|^type|transaktion|aktion)/);
+    m.amount = find(/(betrag|summe|gesamt|amount|total|ausmachend)/, /gebühr|gebuehr|steuer|kurs/);
+    m.fees = find(/(gebühr|gebuehr|provision|entgelt|spesen|fee|kosten)/, /steuer/);
+    m.taxes = find(/(steuer|kest|tax|soli)/);
+    // Modus: Umsätze, wenn Datum + Art vorhanden; sonst Bestand
+    m.mode = (m.date >= 0 && m.type >= 0) ? 'trades' : 'holdings';
+    return m;
+  }
+
+  /** Transaktionsart aus Banktext ableiten. */
+  function parseTradeType(text) {
+    var t = String(text || '').toLowerCase();
+    if (/(verkauf|sell|veräußer|veraeusser|rückzahlung|tilgung)/.test(t)) return 'sell';
+    if (/(dividend|ausschüttung|ausschuettung|ertrag|zins|distribution|coupon|kupon)/.test(t)) return 'dividend';
+    if (/(auslieferung|übertrag aus|uebertrag aus|depotausgang|transfer out)/.test(t)) return 'out';
+    if (/(einlieferung|übertrag ein|uebertrag ein|depoteingang|transfer in|einbuchung)/.test(t)) return 'in';
+    if (/(kauf|buy|sparplan|savings|zeichnung|ausführung|ausfuehrung)/.test(t)) return 'buy';
+    return null;
+  }
+
+  /** Wertpapier per ISIN (oder Name) finden. */
+  function findSecurity(state, isin, name) {
+    var i = String(isin || '').trim().toUpperCase();
+    var n = String(name || '').trim().toLowerCase();
+    for (var k = 0; k < state.securities.length; k++) {
+      var x = state.securities[k];
+      if (i && x.isin && x.isin.trim().toUpperCase() === i) return x;
+    }
+    if (!n) return null;
+    for (var j = 0; j < state.securities.length; j++) {
+      if (state.securities[j].name.trim().toLowerCase() === n) return state.securities[j];
+    }
+    return null;
+  }
+
   /** Einheitlicher Schlüssel für Duplikaterkennung. */
   function dupKey(accountId, date, amount, payee) {
     return accountId + '|' + date + '|' + amount + '|' + String(payee || '').trim().toLowerCase().slice(0, 24);
@@ -1305,7 +1358,7 @@
     applyRules: applyRules, suggestCategory: suggestCategory,
     // CSV
     parseCSV: parseCSV, detectDelimiter: detectDelimiter, detectHeaderRow: detectHeaderRow, guessMapping: guessMapping,
-    dupKey: dupKey, toCSV: toCSV, findTransferPairs: findTransferPairs, mergeTransferPair: mergeTransferPair,
+    dupKey: dupKey, toCSV: toCSV, guessDepotMapping: guessDepotMapping, parseTradeType: parseTradeType, findSecurity: findSecurity, findTransferPairs: findTransferPairs, mergeTransferPair: mergeTransferPair,
     // Zustand
     emptyState: emptyState, normalizeState: normalizeState, demoState: demoState, defaultCategories: defaultCategories
   };

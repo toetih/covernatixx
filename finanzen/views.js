@@ -18,7 +18,7 @@
     var t = today();
     var depots = C.sortedAccounts(s, false).filter(function (a) { return a.type === 'depot'; });
     var html = '<div class="page-head"><div><h1>Depots</h1><div class="sub">Positionen nach Durchschnittskosten · Kurse pflegst du manuell (oder sie ergeben sich aus deinen Käufen).</div></div>' +
-      '<div class="actions">' + (depots.length ? '<button class="btn" data-act="prices">Kurse aktualisieren</button><button class="btn" data-act="securities">Wertpapiere</button><button class="btn" data-act="plan">↻ Sparplan</button><button class="btn primary" data-act="trade" data-type="buy">+ Kauf</button>' : '') + '</div></div>';
+      '<div class="actions">' + (depots.length ? '<label class="btn" title="Depotbestand oder Wertpapier-Umsätze deiner Bank">CSV importieren …<input type="file" accept=".csv,.txt,text/csv" data-act="depot-csv" hidden></label><button class="btn" data-act="prices">Kurse aktualisieren</button><button class="btn" data-act="securities">Wertpapiere</button><button class="btn" data-act="plan">↻ Sparplan</button><button class="btn primary" data-act="trade" data-type="buy">+ Kauf</button>' : '') + '</div></div>';
     if (!depots.length) {
       html += '<div class="card"><div class="empty"><h3>Noch kein Depot</h3><p>Lege ein Konto vom Typ „Depot“ an – danach erfasst du hier Käufe, Verkäufe, Dividenden und Sparpläne.</p><button class="btn primary" data-act="new-depot">Depot anlegen</button></div></div>';
       el.innerHTML = html;
@@ -79,7 +79,10 @@
       html += '</tbody></table></div></div>';
     }
     el.innerHTML = html;
+    var dc = $('[data-act="depot-csv"]', el);
+    if (dc) dc.onchange = function () { if (dc.files[0]) App.depotCsvImport(dc.files[0]); dc.value = ''; };
     el.onclick = function (e) {
+      if (e.target.closest('label.btn')) return;
       var a = e.target.closest('[data-act],[data-trade],[data-sec],[data-price],[data-rule]');
       if (!a) return;
       e.preventDefault();
@@ -855,7 +858,7 @@
     html += '<div class="grid two" style="margin-top:16px">';
     html += '<div class="card"><div class="card-head"><h2>CSV-Import</h2></div><div class="card-body"><p>Umsätze aus dem Online-Banking, von der Kreditkarte oder aus Finanzguru übernehmen. Spalten werden automatisch erkannt, Duplikate übersprungen, Regeln angewendet.</p>' +
       '<div class="row"><label class="btn primary">CSV-Datei wählen …<input type="file" accept=".csv,.txt,text/csv" data-act="csv" hidden></label><button class="btn" data-act="pairs">Umbuchungen erkennen …</button></div>' +
-      '<div class="help mt"><p><b>Finanzguru:</b> Export über Einstellungen › Daten exportieren (CSV). Enthält die Datei mehrere Konten, ordnest du sie im Import einzeln zu.</p><p><b>Umbuchungen erkennen:</b> Nach einem Import mehrerer Konten stehen Überträge doppelt drin (Abgang + Eingang). Diese Funktion findet solche Paare und macht daraus echte Umbuchungen.</p></div></div></div>';
+      '<div class="help mt"><p><b>Depotdaten</b> (Bestand oder Wertpapier-Umsätze) importierst du unter Depots › „CSV importieren …“.</p><p><b>Finanzguru:</b> Export über Einstellungen › Daten exportieren (CSV). Enthält die Datei mehrere Konten, ordnest du sie im Import einzeln zu.</p><p><b>Umbuchungen erkennen:</b> Nach einem Import mehrerer Konten stehen Überträge doppelt drin (Abgang + Eingang). Diese Funktion findet solche Paare und macht daraus echte Umbuchungen.</p></div></div></div>';
     html += '<div class="card"><div class="card-head"><h2>Export &amp; Darstellung</h2></div><div class="card-body">' +
       '<div class="row mb"><button class="btn" data-act="export-csv">Alle Buchungen als CSV (Excel)</button></div>' +
       '<div class="row"><span>Farbschema</span><select data-act="theme"><option value="auto"' + sel('auto', s.settings.theme) + '>wie System</option><option value="light"' + sel('light', s.settings.theme) + '>hell</option><option value="dark"' + sel('dark', s.settings.theme) + '>dunkel</option></select></div>' +
@@ -1051,7 +1054,10 @@
           noAcc = entries.filter(function (e) { return !e.errors.length && !e.accountId; }).length;
           dups = entries.filter(function (e) { return e.dup; }).length;
         }
-        var html = '<div class="grid two"><div><div class="form-grid">' +
+        var hdrL = (rows[o.header] || []).join(' ').toLowerCase();
+        var looksDepot = /isin|wkn/.test(hdrL) && /(stück|stueck|anzahl|menge|nominal|einstand|kurswert)/.test(hdrL);
+        var html = (looksDepot ? '<div class="banner info"><span class="grow"><b>Das sieht nach Depotdaten aus</b> (ISIN, Stückzahl …). Wertpapiere gehören ins Depot, nicht in die Buchungen.</span><button type="button" class="btn primary" data-depot-switch>Als Depot importieren</button></div>' : '') +
+          '<div class="grid two"><div><div class="form-grid">' +
           '<label>Datei</label><div class="ellipsis">' + esc(file.name) + '</div>' +
           '<label>Zeichensatz</label><select data-o="enc"><option value="auto"' + sel('auto', o.enc) + '>automatisch</option><option value="utf-8"' + sel('utf-8', o.enc) + '>UTF-8</option><option value="windows-1252"' + sel('windows-1252', o.enc) + '>Windows (ANSI)</option></select>' +
           '<label>Trennzeichen</label><select data-o="delim">' + [[';', 'Semikolon ;'], [',', 'Komma ,'], ['\t', 'Tabulator'], ['|', 'Senkrechtstrich |']].map(function (x) { return '<option value="' + esc(x[0]) + '"' + sel(x[0], o.delim) + '>' + x[1] + '</option>'; }).join('') + '</select>' +
@@ -1091,6 +1097,8 @@
         var btn = $('button[type=submit]', form);
         btn.textContent = ok.length + ' Buchungen importieren';
         btn.disabled = !ok.length;
+        var sw = $('[data-depot-switch]', form);
+        if (sw) sw.onclick = function () { App.closeModal(); App.depotCsvImport(file); };
         bind(form);
       }
 
@@ -1152,6 +1160,205 @@
           });
           App.toast(entries.length + ' Buchungen importiert' + (created.acc ? ', ' + created.acc + ' Konten angelegt' : '') + (created.cat ? ', ' + created.cat + ' Kategorien angelegt' : '') + '.', { undo: true });
           if (created.acc) setTimeout(function () { App.toast('Tipp: Bei neuen Konten den Anfangsbestand über „Abgleichen“ setzen.'); }, 800);
+        }
+      });
+      render();
+    }).catch(function (e) { App.toast('Datei konnte nicht gelesen werden: ' + e.message, { error: true }); });
+  };
+
+  // ---------------------------------------------------------------- Depot-CSV-Import
+  App.depotCsvImport = function (file) {
+    var s = App.state;
+    var depots = s.accounts.filter(function (a) { return a.type === 'depot' && !a.archived; });
+    if (!depots.length) {
+      App.toast('Bitte zuerst ein Konto vom Typ „Depot“ anlegen.', { error: true });
+      return App.editAccount(null, { type: 'depot', group: 'Geldanlage' });
+    }
+    file.arrayBuffer().then(function (buf) {
+      var o = { enc: 'auto', delim: null, header: null, map: null, depotId: depots[0].id, date: today(), cashAccountId: '', skipHeld: true };
+      var text, rows;
+      function parse() {
+        text = decode(buf, o.enc);
+        if (!o.delim) o.delim = C.detectDelimiter(text);
+        rows = C.parseCSV(text, o.delim);
+        if (o.header == null) {
+          // Kopfzeile: erste Zeile mit ISIN/Stück/Bezeichnung o. ä.
+          o.header = 0;
+          for (var i = 0; i < Math.min(rows.length, 40); i++) {
+            var hits = rows[i].filter(function (c) { return /(isin|wkn|stück|stueck|anzahl|bezeichnung|wertpapier|kurs|einstand)/i.test(c); }).length;
+            if (hits >= 2) { o.header = i; break; }
+          }
+        }
+        if (!o.map) o.map = C.guessDepotMapping(rows[o.header] || []);
+      }
+      parse();
+      function col(r, k) { var i = o.map[k]; return i >= 0 ? String(r[i] == null ? '' : r[i]).trim() : ''; }
+      function num(r, k) { var v = C.parseDecimal(col(r, k)); return isNaN(v) ? null : v; }
+      function cents(r, k) { var v = C.parseMoney(col(r, k)); return isNaN(v) ? null : v; }
+
+      /** Zeilen in Entwürfe umwandeln */
+      function build() {
+        var out = [];
+        var held = {};
+        C.holdings(s, o.depotId, null).forEach(function (h) { if (h.qty > 0) held[h.securityId] = true; });
+        var existing = {};
+        s.trades.forEach(function (tr) { existing[[tr.depotId, tr.date, tr.securityId, tr.type, C.roundQty(tr.qty || 0), tr.amount || 0].join('|')] = true; });
+        rows.slice(o.header + 1).forEach(function (r, i) {
+          if (r.every(function (c) { return !String(c).trim(); })) return;
+          var e = { line: o.header + i + 2, errors: [], warn: '' };
+          e.name = col(r, 'name');
+          e.isin = (col(r, 'isin') || '').toUpperCase();
+          e.wkn = col(r, 'wkn');
+          if (!e.name && !e.isin) return; // Leerzeilen
+          if (!e.isin && /^(summe|gesamt|total|depotwert|saldo)/i.test(e.name)) return; // Summenzeilen der Bank
+          e.sec = C.findSecurity(s, e.isin, e.name);
+          var qty = num(r, 'qty');
+          e.qty = qty != null ? Math.abs(qty) : 0;
+          if (o.map.mode === 'holdings') {
+            e.type = 'in';
+            e.date = o.date;
+            var cp = num(r, 'costPrice');
+            var cv = cents(r, 'costValue');
+            if (cp != null && cp > 0) e.price = Math.abs(cp);
+            else if (cv != null && e.qty) e.price = Math.abs(cv) / 100 / e.qty;
+            var pr = num(r, 'price');
+            var val = cents(r, 'value');
+            e.current = pr != null && pr > 0 ? Math.abs(pr) : (val != null && e.qty ? Math.abs(val) / 100 / e.qty : null);
+            if (!e.price && e.current) { e.price = e.current; e.warn = 'kein Einstand – aktueller Kurs verwendet'; }
+            if (!e.qty) e.errors.push('Stück');
+            if (!e.price) e.errors.push('Kurs');
+            if (e.sec && held[e.sec.id] && o.skipHeld) e.skip = 'schon im Depot';
+          } else {
+            e.date = C.parseDate(col(r, 'date'));
+            if (!e.date) e.errors.push('Datum');
+            e.type = C.parseTradeType(col(r, 'type'));
+            if (!e.type) e.errors.push('Art „' + col(r, 'type') + '“');
+            var amount = cents(r, 'amount');
+            e.fees = Math.abs(cents(r, 'fees') || 0);
+            e.taxes = Math.abs(cents(r, 'taxes') || 0);
+            var price = num(r, 'price');
+            if (e.type === 'dividend') {
+              // Betrag = Auszahlung (netto) → brutto = netto + Steuern
+              e.amount = Math.abs(amount || 0) + e.taxes;
+              if (!e.amount) e.errors.push('Betrag');
+            } else {
+              e.price = price != null && price > 0 ? Math.abs(price) : null;
+              // Mit Betrag: Kurs so ableiten, dass die Geldbewegung centgenau stimmt (Banken runden die Stückzahl)
+              var fromAmount = amount != null && e.qty ? Math.max(0, Math.abs(amount) - (e.type === 'buy' ? e.fees : -e.fees - e.taxes)) / 100 / e.qty : null;
+              if (fromAmount && (!e.price || Math.abs(fromAmount - e.price) / e.price < 0.01)) e.price = fromAmount;
+              if (!e.qty) e.errors.push('Stück');
+              if (!e.price && e.type !== 'out') e.errors.push('Kurs');
+            }
+            var key = [o.depotId, e.date, e.sec ? e.sec.id : '', e.type, C.roundQty(e.type === 'dividend' ? 0 : e.qty), e.type === 'dividend' ? e.amount : 0].join('|');
+            if (e.sec && existing[key]) e.skip = 'Duplikat';
+          }
+          out.push(e);
+        });
+        return out;
+      }
+
+      function render() {
+        var form = $('#modal-root form');
+        var m = o.map;
+        var entries = build();
+        var ok = entries.filter(function (e) { return !e.errors.length && !e.skip; });
+        var hdr = rows[o.header] || [];
+        function colOpts(k) {
+          var v = m[k];
+          return '<option value="-1">– nicht verwenden –</option>' + hdr.map(function (h, i) { return '<option value="' + i + '"' + (i === v ? ' selected' : '') + '>' + esc(h || ('Spalte ' + (i + 1))) + '</option>'; }).join('');
+        }
+        function msel(k, label) { return '<label>' + label + '</label><select data-m="' + k + '">' + colOpts(k) + '</select>'; }
+        var hold = m.mode === 'holdings';
+        var html = '<div class="grid two"><div><div class="form-grid">' +
+          '<label>Datei</label><div class="ellipsis">' + esc(file.name) + '</div>' +
+          '<label>Inhalt</label><select data-o="mode"><option value="holdings"' + sel('holdings', m.mode) + '>Depotbestand (Positionen)</option><option value="trades"' + sel('trades', m.mode) + '>Umsätze (Käufe, Verkäufe, Dividenden)</option></select>' +
+          '<label>Zeichensatz</label><select data-o="enc"><option value="auto"' + sel('auto', o.enc) + '>automatisch</option><option value="utf-8"' + sel('utf-8', o.enc) + '>UTF-8</option><option value="windows-1252"' + sel('windows-1252', o.enc) + '>Windows (ANSI)</option></select>' +
+          '<label>Trennzeichen</label><select data-o="delim">' + [[';', 'Semikolon ;'], [',', 'Komma ,'], ['\t', 'Tabulator'], ['|', 'Senkrechtstrich |']].map(function (x) { return '<option value="' + esc(x[0]) + '"' + sel(x[0], o.delim) + '>' + x[1] + '</option>'; }).join('') + '</select>' +
+          '<label>Kopfzeile</label><select data-o="header">' + rows.slice(0, 30).map(function (r, i) { return '<option value="' + i + '"' + (i === o.header ? ' selected' : '') + '>Zeile ' + (i + 1) + ': ' + esc(r.slice(0, 4).join(' | ').slice(0, 60)) + '</option>'; }).join('') + '</select>' +
+          '<label>In Depot</label><select data-o="depotId">' + App.accountOptions(o.depotId, { filter: function (a) { return a.type === 'depot'; } }) + '</select>' +
+          (hold ? '<label>Stichtag</label><input type="date" data-o="date" value="' + esc(o.date) + '">' +
+            '<span></span><label class="chk"><input type="checkbox" data-o="skipHeld"' + (o.skipHeld ? ' checked' : '') + '> Wertpapiere überspringen, die schon im Depot sind</label>'
+            : '<label>Verrechnungskonto</label><select data-o="cashAccountId"><option value="">– keine Geldbuchung (empfohlen bei Altdaten) –</option>' + App.accountOptions(o.cashAccountId) + '</select>') +
+          '</div></div><div><div class="form-grid">' +
+          msel('name', 'Bezeichnung') + msel('isin', 'ISIN') + msel('qty', 'Stück') +
+          (hold ? msel('costPrice', 'Einstandskurs') + msel('costValue', 'Einstandswert') + msel('price', 'Aktueller Kurs') + msel('value', 'Kurswert')
+            : msel('date', 'Datum') + msel('type', 'Art') + msel('price', 'Kurs') + msel('amount', 'Betrag') + msel('fees', 'Gebühren') + msel('taxes', 'Steuern')) +
+          '</div></div></div>';
+        html += '<div class="help mt">' + (hold
+          ? 'Jede Position wird mit Stück und <b>Einstandskurs</b> eingebucht (ohne Geldbewegung). Der aktuelle Kurs wird als Kurs zum Stichtag gespeichert – so stimmen Depotwert und Gewinn/Verlust sofort.'
+          : 'Jede Zeile wird eine Depot-Transaktion. <b>Ohne Verrechnungskonto</b> entsteht keine Geldbuchung – richtig, wenn das Geld auf deinen Konten schon erfasst ist oder die Käufe vor deinem Start liegen. Dividenden: „Betrag“ = Auszahlung nach Steuern.') + '</div>';
+        html += '<div class="summary-line" style="padding-left:0;border:0"><span><b>' + ok.length + '</b> werden importiert</span>' +
+          (entries.filter(function (e) { return e.skip; }).length ? '<span><b>' + entries.filter(function (e) { return e.skip; }).length + '</b> übersprungen</span>' : '') +
+          (entries.filter(function (e) { return e.errors.length; }).length ? '<span class="neg"><b>' + entries.filter(function (e) { return e.errors.length; }).length + '</b> fehlerhaft</span>' : '') +
+          '<span><b>' + ok.filter(function (e) { return !e.sec; }).length + '</b> neue Wertpapiere</span></div>';
+        html += '<div class="tbl-wrap" style="max-height:36vh"><table class="tbl"><thead><tr><th>Zeile</th>' + (hold ? '' : '<th>Datum</th><th>Art</th>') + '<th>Wertpapier</th><th class="num">Stück</th><th class="num">' + (hold ? 'Einstandskurs' : 'Kurs / Betrag') + '</th>' + (hold ? '<th class="num">Akt. Kurs</th><th class="num">Wert</th>' : '') + '<th></th></tr></thead><tbody>' +
+          entries.slice(0, 80).map(function (e) {
+            var st = e.errors.length ? '<span class="badge warn">Fehlt: ' + esc(e.errors.join(', ')) + '</span>' : (e.skip ? '<span class="badge">' + esc(e.skip) + '</span>' : (e.warn ? '<span class="badge warn">' + esc(e.warn) + '</span>' : (!e.sec ? '<span class="badge accent">neu</span>' : '')));
+            return '<tr class="' + (e.errors.length || e.skip ? 'muted' : '') + '"><td class="small">' + e.line + '</td>' +
+              (hold ? '' : '<td class="nowrap">' + (e.date ? C.formatDate(e.date) : '') + '</td><td>' + esc(e.type ? C.TRADE_TYPES[e.type] : '') + '</td>') +
+              '<td>' + esc(e.name || (e.sec && e.sec.name) || '') + '<div class="small">' + esc(e.isin) + '</div></td>' +
+              '<td class="num">' + (e.type === 'dividend' ? '' : esc(C.formatNumber(e.qty, 6))) + '</td>' +
+              '<td class="num">' + (e.type === 'dividend' ? esc(C.formatMoney(e.amount)) : (e.price ? esc(C.formatNumber(e.price, 4)) + ' €' : '–')) + '</td>' +
+              (hold ? '<td class="num">' + (e.current ? esc(C.formatNumber(e.current, 4)) + ' €' : '–') + '</td><td class="num">' + (e.qty && (e.current || e.price) ? esc(C.formatMoney(Math.round(e.qty * (e.current || e.price) * 100))) : '–') + '</td>' : '') +
+              '<td>' + st + '</td></tr>';
+          }).join('') + (entries.length > 80 ? '<tr class="muted"><td colspan="8">… ' + (entries.length - 80) + ' weitere</td></tr>' : '') + '</tbody></table></div>';
+        $('.modal-body', form).innerHTML = html;
+        var btn = $('button[type=submit]', form);
+        btn.textContent = ok.length + (hold ? ' Positionen einbuchen' : ' Transaktionen importieren');
+        btn.disabled = !ok.length;
+        $$('[data-o]', form).forEach(function (inp) {
+          inp.onchange = function () {
+            var k = inp.dataset.o;
+            if (inp.type === 'checkbox') o[k] = inp.checked;
+            else if (k === 'mode') o.map.mode = inp.value;
+            else if (k === 'header') { o.header = +inp.value; o.map = null; }
+            else if (k === 'delim') { o.delim = inp.value; o.header = null; o.map = null; }
+            else o[k] = inp.value;
+            parse();
+            render();
+          };
+        });
+        $$('[data-m]', form).forEach(function (inp) { inp.onchange = function () { o.map[inp.dataset.m] = +inp.value; render(); }; });
+      }
+
+      App.modal({
+        title: 'Depot-Import', body: '', wide: true, submitLabel: 'Importieren',
+        onSubmit: function () {
+          var entries = build().filter(function (e) { return !e.errors.length && !e.skip; });
+          if (!entries.length) return false;
+          var hold = o.map.mode === 'holdings';
+          var newSecs = 0;
+          App.commit('Depot-Import', function (st) {
+            var cache = {};
+            entries.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+            entries.forEach(function (e) {
+              var key = e.isin || e.name.toLowerCase();
+              var sec = cache[key] || C.findSecurity(st, e.isin, e.name);
+              if (!sec) {
+                sec = { id: C.uid(), name: e.name || e.isin, isin: e.isin || e.wkn || '', kind: /etf|index|msci|ftse|s&p/i.test(e.name) ? 'ETF' : 'Aktie', prices: [] };
+                st.securities.push(sec);
+                newSecs++;
+              }
+              cache[key] = sec;
+              if (hold) {
+                C.saveTrade(st, { id: C.uid(), date: e.date, depotId: o.depotId, securityId: sec.id, type: 'in', qty: e.qty, price: e.price, fees: 0, taxes: 0, cashAccountId: null, note: 'Import Depotbestand' });
+                if (e.current) {
+                  sec.prices = sec.prices.filter(function (p) { return p.date !== e.date; });
+                  sec.prices.push({ date: e.date, price: e.current });
+                  sec.prices.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+                }
+              } else {
+                C.saveTrade(st, {
+                  id: C.uid(), date: e.date, depotId: o.depotId, securityId: sec.id, type: e.type,
+                  qty: e.type === 'dividend' ? 0 : e.qty, price: e.type === 'dividend' ? 0 : (e.price || 0),
+                  amount: e.type === 'dividend' ? e.amount : 0, fees: e.fees || 0, taxes: e.taxes || 0,
+                  cashAccountId: e.type === 'in' || e.type === 'out' ? null : (o.cashAccountId || null), note: 'Import'
+                });
+              }
+            });
+          });
+          App.toast(entries.length + (hold ? ' Positionen eingebucht' : ' Transaktionen importiert') + (newSecs ? ', ' + newSecs + ' Wertpapiere angelegt' : '') + '.', { undo: true });
+          App.go('depots');
         }
       });
       render();

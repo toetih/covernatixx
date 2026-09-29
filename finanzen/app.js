@@ -54,6 +54,9 @@
     try { localStorage.setItem('finanzen-ui', JSON.stringify({ tx: App.ui.tx, quick: App.ui.quick })); } catch (e) { /* ignore */ }
   }
 
+  /** Konten, die als „liquide“ zählen (Geld, keine Depots/Kredite/Sachwerte). */
+  App.isCashAccount = function (a) { return ['depot', 'darlehen', 'immobilie'].indexOf(a.type) < 0; };
+
   App.h = { $: $, $$: $$, esc: esc, money: money, today: today, acc: acc, cat: cat, accName: accName, catLabel: catLabel };
 
   // ---------------------------------------------------------------- Speichern & Undo
@@ -328,6 +331,13 @@
         html += '<div class="banner"><span class="grow">Deine Daten liegen nur im Browser. Lege eine Datei als Speicherort an oder exportiere regelmäßig ein Backup.</span><a class="btn" href="#daten">Einrichten</a></div>';
       }
     }
+    s.accounts.forEach(function (a) {
+      if (a.type !== 'darlehen' || a.archived || !a.loan || !a.loan.fixedUntil) return;
+      var days = C.diffDays(today(), a.loan.fixedUntil);
+      if (days < 0 || days > 365 || !C.loanDebt(s, a.id, today())) return;
+      var st = C.loanStats(s, a.id, today());
+      html += '<div class="banner info"><span class="grow"><b>Zinsbindung „' + esc(a.name) + '“ endet am ' + C.formatDate(a.loan.fixedUntil) + '</b> (in ' + days + ' Tagen). Restschuld dann ca. ' + esc(C.formatMoney(st.restAtFixedEnd)) + ' – Zeit, Anschlussfinanzierung / Forward-Darlehen zu vergleichen.</span><a class="btn" href="#kredite">Zum Kredit</a></div>';
+    });
     if (s.meta.demo) {
       html += '<div class="banner info"><span class="grow">Du siehst <b>Beispieldaten</b>. Schau dich um – wenn du startklar bist, lösche sie und lege deine eigenen Konten an.</span><button class="btn" data-clear-demo>Beispieldaten löschen</button></div>';
     }
@@ -404,7 +414,7 @@
       if (a.type === 'depot') {
         depots += bal[a.id];
         C.holdings(s, a.id, t).forEach(function (h) { depotCost += h.cost; });
-      } else if (a.type !== 'darlehen') liquid += bal[a.id];
+      } else if (App.isCashAccount(a)) liquid += bal[a.id];
     });
     var depotHoldValue = 0;
     s.accounts.forEach(function (a) { if (a.type === 'depot' && !a.excludeFromNetWorth) depotHoldValue += C.depotValue(s, a.id, t); });
@@ -414,7 +424,7 @@
     var inc = rep.income[mk] || 0, exp = rep.expense[mk] || 0;
     var fc = C.forecastBalances(s, t, me);
     var fcLiquid = 0;
-    s.accounts.forEach(function (a) { if (!a.excludeFromNetWorth && a.type !== 'depot' && a.type !== 'darlehen') fcLiquid += fc[a.id]; });
+    s.accounts.forEach(function (a) { if (!a.excludeFromNetWorth && App.isCashAccount(a)) fcLiquid += fc[a.id]; });
 
     var html = '<div class="page-head"><div><h1>Übersicht</h1><div class="sub">' + esc(C.MONTHS_LONG[+t.slice(5, 7) - 1] + ' ' + t.slice(0, 4)) + ' · Stand ' + C.formatDate(t) + '</div></div>' +
       '<div class="actions"><button class="btn primary" data-act="new-tx">+ Buchung</button><button class="btn" data-act="new-transfer">⇄ Umbuchung</button></div></div>';
@@ -508,6 +518,7 @@
   function kpi(l, v, s) { return '<div class="kpi"><div class="l">' + esc(l) + '</div><div class="v">' + v + '</div><div class="s">' + s + '</div></div>'; }
 
   function ruleAccountsLabel(r) {
+    if (r.loanAccountId) return accName(r.accountId) + ' → ' + accName(r.loanAccountId);
     if (r.securityId) return accName(r.accountId) + ' → ' + accName(r.depotId);
     if (r.counterAccountId) return accName(r.accountId) + ' → ' + accName(r.counterAccountId);
     return accName(r.accountId) + (r.categoryId ? ' · ' + C.categoryPath(App.state, r.categoryId) : '');
@@ -988,7 +999,7 @@
     var type = t ? (t.counterAccountId ? 'transfer' : (t.amount < 0 ? 'expense' : 'income')) : (preset.type || 'expense');
     var d = t ? Object.assign({}, t) : {
       date: today(), accountId: preset.accountId || App.ui.quick.accountId || (C.sortedAccounts(s, false)[0] || {}).id,
-      counterAccountId: null, amount: 0, payee: '', categoryId: null, note: '', tags: []
+      counterAccountId: preset.counterAccountId || null, amount: 0, payee: preset.payee || '', categoryId: null, note: '', tags: []
     };
     function body() {
       var tr = type === 'transfer';
@@ -1037,6 +1048,7 @@
           };
           if (d.recurringId) rec.recurringId = d.recurringId;
           if (d.excludeFromReports && !rec.categoryId && type !== 'transfer') rec.excludeFromReports = true;
+          if (d.loanPart) rec.loanPart = d.loanPart;
           App.commit(isNew ? 'Buchung angelegt' : 'Buchung geändert', function (st) {
             var i = st.transactions.findIndex(function (x) { return x.id === rec.id; });
             if (i >= 0) st.transactions[i] = rec; else st.transactions.push(rec);
@@ -1267,7 +1279,7 @@
       if (map[k]) { e.preventDefault(); App.setQuickType(map[k]); return; }
     }
     if (typing || modalOpen || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (/^[1-8]$/.test(e.key)) {
+    if (/^[1-9]$/.test(e.key)) {
       var links = $$('#nav a');
       var l = links[+e.key - 1];
       if (l) { e.preventDefault(); location.hash = l.dataset.view; }

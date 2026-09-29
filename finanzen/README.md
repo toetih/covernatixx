@@ -18,13 +18,15 @@ Tipp: In Chrome/Edge über Menü › „Streamen, speichern und teilen“ › �
 4. **Wiederkehrend:** Gehalt, Miete, Versicherungen, Abos, Sparraten und Sparpläne eintragen.
    - *automatisch*: wird am Fälligkeitstag gebucht.
    - *bestätigen*: erscheint in der Übersicht zum Buchen, Anpassen oder Überspringen (für schwankende Beträge).
-5. Optional **CSV-Import** aus Online-Banking oder Finanzguru, danach „Umbuchungen erkennen“.
+5. **Kredite › + Kredit** für eine Baufinanzierung: aktuelle Restschuld, Sollzins, Monatsrate, Zinsbindung. Die Rate wird monatlich gebucht: Zinsen als Ausgabe, Tilgung senkt die Restschuld. Optional die Immobilie als Vermögenswert anlegen.
+6. Optional **CSV-Import** aus Online-Banking oder Finanzguru, danach „Umbuchungen erkennen“.
 
 ## Im Alltag
 
 - `N` → neue Buchung, `Enter` bucht. `+50` = Einnahme, `Alt+U` = Umbuchung, `#tag` in der Notiz = Tag.
 - **Abgleichen** (Konten): echten Kontostand eingeben, die Differenz wird als Korrektur gebucht.
 - **Kurse aktualisieren** (Depots): alle Kurse in einer Maske nachtragen.
+- **Sondertilgung** (Kredite): als Umbuchung aufs Darlehenskonto. Der Rechner „Was wäre wenn …“ zeigt vorher, wie viel Zeit und Zinsen sie spart.
 - `Strg+Z` macht die letzte Änderung rückgängig.
 
 ## Technik

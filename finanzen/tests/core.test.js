@@ -242,3 +242,67 @@ test('Abgleich: alte Buchungen nachtragen und Anfangsbestand anpassen', () => {
   assert.equal(rep.expense['2025-06'], 0);
   assert.equal(C.reconcileAccount(s, 'giro', '2025-06-02', 99000, 'booking'), 0);
 });
+
+function loanState() {
+  const s = baseState();
+  s.categories.push({ id: 'zins', name: 'Kreditzinsen', type: 'expense', parentId: null });
+  // 300.000 € Restschuld, 3,5 % Sollzins, 1.500 € Rate
+  s.accounts.push({ id: 'kredit', name: 'Baufinanzierung', type: 'darlehen', opening: -30000000,
+    loan: { rate: 3.5, amount: 35000000, fixedUntil: '2035-06-30', interestCategoryId: 'zins' } });
+  s.recurring.push({ id: 'rate', name: 'Rate', active: true, mode: 'auto', unit: 'month', interval: 1,
+    accountId: 'giro', loanAccountId: 'kredit', amount: 150000, startDate: '2025-07-30', anchorDay: 30, nextDate: '2025-07-30' });
+  return s;
+}
+
+test('Kredit: Rate teilt sich in Zinsen (Ausgabe) und Tilgung', () => {
+  const s = loanState();
+  C.processRecurring(s, '2025-08-31');
+  assert.equal(s.transactions.length, 4);
+  const z1 = s.transactions.find(t => t.loanPart === 'interest' && t.date === '2025-07-30');
+  assert.equal(z1.amount, -87500);               // 300.000 × 3,5 % / 12
+  assert.equal(C.loanDebt(s, 'kredit', '2025-07-31'), 30000000 - 62500);
+  const z2 = s.transactions.find(t => t.loanPart === 'interest' && t.date === '2025-08-30');
+  assert.equal(z2.amount, -Math.round((30000000 - 62500) * 3.5 / 1200));
+  // Girokonto: nur die Raten
+  assert.equal(C.accountBalance(s, 'giro', '2025-08-31'), 100000 - 300000);
+  // Auswertung: nur die Zinsen sind Ausgaben
+  const rep = C.categoryReport(s, { from: '2025-07-01', to: '2025-08-31' });
+  assert.equal(rep.expense['2025-07'], -87500);
+  // Vermögen sinkt nur um die Zinsen
+  assert.equal(C.netWorth(s, '2025-08-31'), 100000 - 30000000 + z1.amount + z2.amount);
+});
+
+test('Kredit: Tilgungsplan, Sondertilgung, Restschuld Zinsbindung, Prognose', () => {
+  const s = loanState();
+  const st = C.loanStats(s, 'kredit', '2025-07-01');
+  assert.equal(st.debt, 30000000);
+  const rows = st.schedule.rows;
+  assert.equal(rows[0].interest, 87500);
+  assert.equal(rows[0].principal, 62500);
+  assert.ok(st.schedule.payoffDate > '2050-01-01' && st.schedule.payoffDate < '2055-12-31', st.schedule.payoffDate);
+  assert.equal(rows[rows.length - 1].rest, 0);
+  assert.ok(st.restAtFixedEnd > 0 && st.restAtFixedEnd < 30000000);
+  const withExtra = C.loanStats(s, 'kredit', '2025-07-01', { extra: 500000, extraMonth: 12 });
+  assert.ok(withExtra.schedule.payoffDate < st.schedule.payoffDate);
+  assert.ok(withExtra.schedule.totalInterest < st.schedule.totalInterest);
+  // Rate deckt Zinsen nicht -> läuft nie ab
+  const never = C.loanSchedule({ debt: 30000000, rate: 7, payment: 150000, firstDate: '2025-01-01' });
+  assert.equal(never.neverEnds, true);
+  // Prognose rechnet mit Zinsen
+  const f = C.forecastBalances(s, '2025-07-01', '2025-08-31');
+  assert.equal(f.giro, 100000 - 300000);
+  assert.equal(f.kredit, -30000000 + 150000 - 87500 + 150000 - Math.round((30000000 - 62500) * 3.5 / 1200));
+  // Monatlicher Anteil
+  assert.equal(C.monthlyEquivalent(s.recurring[0]), -150000);
+});
+
+test('Kredit: letzte Rate nur bis Restschuld, danach Regel inaktiv', () => {
+  const s = loanState();
+  s.accounts.find(a => a.id === 'kredit').opening = -100000;
+  C.processRecurring(s, '2026-12-31');
+  assert.equal(C.loanDebt(s, 'kredit', '2026-12-31'), 0);
+  assert.equal(s.recurring[0].active, false);
+  const pays = s.transactions.filter(t => t.loanPart === 'payment');
+  assert.equal(pays.length, 1);
+  assert.equal(pays[0].amount, -(100000 + Math.round(100000 * 3.5 / 1200)));
+});

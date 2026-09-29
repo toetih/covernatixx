@@ -237,13 +237,14 @@
 
   function ruleKind(rule) {
     if (rule.securityId) return 'savingsplan';
+    if (rule.loanAccountId) return 'loan';
     if (rule.counterAccountId) return 'transfer';
     return rule.amount < 0 ? 'expense' : 'income';
   }
 
   /** Betrag der Regel aus Sicht von rule.accountId (Sparplan: negativ). */
   function ruleAmount(rule) {
-    if (rule.securityId) return -Math.abs(rule.amount);
+    if (rule.securityId || rule.loanAccountId) return -Math.abs(rule.amount);
     return rule.amount;
   }
 
@@ -265,6 +266,7 @@
       saveTrade(state, trade);
       return { trade: trade };
     }
+    if (rule.loanAccountId) return materializeLoanPayment(state, rule, dateIso, overrides);
     var t = {
       id: uid(),
       date: dateIso,
@@ -288,8 +290,7 @@
       if (!rule.active || rule.mode !== 'auto') return;
       var dates = occurrences(rule, today, 400);
       dates.forEach(function (d) {
-        materializeRule(state, rule, d);
-        created++;
+        if (materializeRule(state, rule, d)) created++;
       });
       if (dates.length) rule.nextDate = stepDate(rule, dates[dates.length - 1]);
       finishIfEnded(rule);
@@ -348,6 +349,18 @@
     state.recurring.forEach(function (rule) {
       if (!rule.active) return;
       occurrences(rule, toIso, 1000).forEach(function () {
+        if (rule.loanAccountId) {
+          // Zinsen auf die simulierte Restschuld, Rate höchstens bis zur Restschuld
+          var la = findById(state.accounts, rule.loanAccountId);
+          if (!la || bal[la.id] == null) return;
+          var debt = -bal[la.id];
+          if (debt <= 0) return;
+          var interest = Math.round(debt * loanRate(la) / 1200);
+          var pay = Math.min(Math.abs(rule.amount), debt + interest);
+          bal[la.id] += pay - interest;
+          if (bal[rule.accountId] != null) bal[rule.accountId] -= pay;
+          return;
+        }
         var amt = ruleAmount(rule);
         if (rule.accountId && bal[rule.accountId] != null) bal[rule.accountId] += amt;
         if (rule.counterAccountId && bal[rule.counterAccountId] != null) bal[rule.counterAccountId] -= amt;
@@ -355,6 +368,139 @@
       });
     });
     return bal;
+  }
+
+  // ---------------------------------------------------------------- Kredite (Annuitätendarlehen)
+  function loanRate(acc) { return (acc && acc.loan && acc.loan.rate) || 0; }
+
+  /** Restschuld (positiv) eines Darlehenskontos zum Stichtag. */
+  function loanDebt(state, loanId, asOf) {
+    return Math.max(0, -cashBalance(state, loanId, asOf));
+  }
+
+  /**
+   * Monatsrate buchen: Zinsen als Ausgabe auf dem Darlehenskonto (erhöhen die Schuld),
+   * Rate als Umbuchung vom Belastungskonto aufs Darlehenskonto (senkt die Schuld).
+   * So zeigt das Girokonto genau eine Abbuchung wie auf dem Kontoauszug.
+   */
+  function materializeLoanPayment(state, rule, dateIso, overrides) {
+    overrides = overrides || {};
+    var la = findById(state.accounts, rule.loanAccountId);
+    if (!la) return null;
+    var debt = loanDebt(state, la.id, dateIso);
+    if (debt <= 0) { rule.active = false; return null; }
+    var interest = overrides.interest != null ? overrides.interest : Math.round(debt * loanRate(la) / 1200);
+    var pay = Math.min(Math.abs(overrides.amount != null ? overrides.amount : rule.amount), debt + interest);
+    var res = {};
+    if (interest > 0) {
+      res.interest = {
+        id: uid(), date: dateIso, accountId: la.id, counterAccountId: null, amount: -interest,
+        payee: 'Zinsen ' + la.name, categoryId: (la.loan && la.loan.interestCategoryId) || null,
+        note: '', tags: [], recurringId: rule.id, loanPart: 'interest'
+      };
+      state.transactions.push(res.interest);
+    }
+    res.transaction = {
+      id: uid(), date: dateIso, accountId: rule.accountId, counterAccountId: la.id, amount: -pay,
+      payee: rule.payee || rule.name || ('Rate ' + la.name), categoryId: null,
+      note: overrides.note != null ? overrides.note : (rule.note || ''), tags: [], recurringId: rule.id, loanPart: 'payment'
+    };
+    state.transactions.push(res.transaction);
+    if (debt + interest - pay <= 0) rule.active = false;
+    return res;
+  }
+
+  /**
+   * Tilgungsplan ab einer Restschuld.
+   * opts: { debt (Cent), rate (% p.a.), payment (Cent/Monat), firstDate, anchorDay,
+   *         extra (Cent Sondertilgung je Jahr), extraMonth (1–12), rateAfter, fixedUntil, maxMonths }
+   * Rückgabe: { rows: [{date, interest, principal, extra, rest}], payoffDate, totalInterest, restAt(date) }
+   */
+  function loanSchedule(opts) {
+    var rows = [];
+    var rest = Math.max(0, opts.debt || 0);
+    var date = opts.firstDate;
+    var anchor = opts.anchorDay || parts(date).d;
+    var max = opts.maxMonths || 720;
+    var totalInterest = 0;
+    var rule = { unit: 'month', interval: 1, anchorDay: anchor };
+    var neverEnds = false;
+    for (var i = 0; i < max && rest > 0; i++) {
+      var rate = opts.fixedUntil && opts.rateAfter != null && date > opts.fixedUntil ? opts.rateAfter : opts.rate;
+      var interest = Math.round(rest * rate / 1200);
+      if (opts.payment <= interest) { neverEnds = true; break; }
+      var pay = Math.min(opts.payment, rest + interest);
+      var principal = pay - interest;
+      rest -= principal;
+      var extra = 0;
+      if (opts.extra && rest > 0 && parts(date).m === (opts.extraMonth || 12)) {
+        extra = Math.min(opts.extra, rest);
+        rest -= extra;
+      }
+      totalInterest += interest;
+      rows.push({ date: date, interest: interest, principal: principal, extra: extra, rest: rest });
+      date = stepDate(rule, date);
+    }
+    var last = rows[rows.length - 1];
+    return {
+      rows: rows,
+      payoffDate: last && last.rest <= 0 ? last.date : null,
+      neverEnds: neverEnds,
+      totalInterest: totalInterest,
+      restAt: function (iso) {
+        var r = opts.debt || 0;
+        for (var k = 0; k < rows.length && rows[k].date <= iso; k++) r = rows[k].rest;
+        return r;
+      }
+    };
+  }
+
+  /** Aktive Raten-Regel eines Darlehens (sonst die zuletzt angelegte). */
+  function loanRule(state, loanId) {
+    var found = null;
+    for (var i = 0; i < state.recurring.length; i++) {
+      var r = state.recurring[i];
+      if (r.loanAccountId !== loanId) continue;
+      if (r.active) return r;
+      found = r;
+    }
+    return found;
+  }
+
+  /** Kennzahlen eines Darlehens zum Stichtag. opts: { extra, extraMonth, rateAfter } */
+  function loanStats(state, loanId, today, opts) {
+    opts = opts || {};
+    var la = findById(state.accounts, loanId);
+    var cfg = (la && la.loan) || {};
+    var rule = loanRule(state, loanId);
+    var debt = loanDebt(state, loanId, today);
+    var interestYear = 0, interestTotal = 0, paidTotal = 0, extraTotal = 0;
+    var year = today.slice(0, 4);
+    state.transactions.forEach(function (t) {
+      if (t.date > today) return;
+      if (t.accountId === loanId && t.loanPart === 'interest') {
+        interestTotal -= t.amount;
+        if (t.date.slice(0, 4) === year) interestYear -= t.amount;
+      }
+      if (t.counterAccountId === loanId) {
+        paidTotal -= t.amount;
+        if (t.loanPart !== 'payment') extraTotal -= t.amount;
+      }
+    });
+    var active = rule && rule.active;
+    var sched = loanSchedule({
+      debt: debt, rate: cfg.rate || 0, payment: active ? Math.abs(rule.amount) : 0,
+      firstDate: active ? rule.nextDate : addMonths(today, 1), anchorDay: active ? rule.anchorDay : null,
+      extra: opts.extra || 0, extraMonth: opts.extraMonth || 12,
+      fixedUntil: cfg.fixedUntil || null, rateAfter: opts.rateAfter != null ? opts.rateAfter : null
+    });
+    return {
+      account: la, config: cfg, rule: rule, debt: debt,
+      interestYear: interestYear, interestTotal: interestTotal, paidTotal: paidTotal, extraTotal: extraTotal,
+      schedule: sched,
+      restAtFixedEnd: cfg.fixedUntil ? sched.restAt(cfg.fixedUntil) : null,
+      repaidShare: cfg.amount ? Math.max(0, Math.min(1, 1 - debt / cfg.amount)) : null
+    };
   }
 
   // ---------------------------------------------------------------- Hilfen
@@ -866,6 +1012,7 @@
     bar: 'Bargeld',
     depot: 'Depot',
     darlehen: 'Kredit / Darlehen',
+    immobilie: 'Immobilie / Sachwert',
     sonstiges: 'Sonstiges'
   };
 
@@ -873,7 +1020,7 @@
 
   var DEFAULT_CATEGORIES = {
     expense: [
-      ['Wohnen', ['Miete / Kredit', 'Nebenkosten', 'Strom', 'Internet & Telefon', 'Rundfunkbeitrag', 'Einrichtung & Reparatur']],
+      ['Wohnen', ['Miete', 'Kreditzinsen', 'Nebenkosten', 'Strom', 'Internet & Telefon', 'Rundfunkbeitrag', 'Einrichtung & Reparatur']],
       ['Lebenshaltung', ['Lebensmittel', 'Drogerie', 'Kleidung', 'Haushalt']],
       ['Mobilität', ['Kraftstoff / Laden', 'Kfz-Versicherung', 'Kfz-Steuer', 'Werkstatt & Wartung', 'ÖPNV / Bahn', 'Parken']],
       ['Versicherungen', ['Haftpflicht', 'Hausrat', 'Berufsunfähigkeit', 'Kranken / Pflege', 'Rechtsschutz', 'Leben / Risiko']],
@@ -999,6 +1146,7 @@
     var depot2 = acc('Aktien-Depot', 'depot', 'Geldanlage', 250000);
 
     var start = addMonths(startOfMonth(today), -5, 1);
+    function C_findAcc(id) { return findById(s.accounts, id); }
     function rule(o) {
       var r = Object.assign({ id: uid(), active: true, mode: 'auto', unit: 'month', interval: 1, tags: [], note: '' }, o);
       r.anchorDay = parts(r.startDate).d;
@@ -1007,7 +1155,11 @@
       return r;
     }
     rule({ name: 'Gehalt', accountId: giro, amount: 385000, payee: 'Arbeitgeber GmbH', categoryId: cat('Gehalt'), startDate: addDays(start, 26) });
-    rule({ name: 'Miete', accountId: giro, amount: -115000, payee: 'Vermieter', categoryId: cat('Miete / Kredit'), startDate: addDays(start, 2) });
+    // Baufinanzierung mit Haus
+    var haus = acc('Haus', 'immobilie', 'Immobilie', 42000000);
+    var bauf = acc('Baufinanzierung', 'darlehen', 'Immobilie', -27500000);
+    C_findAcc(bauf).loan = { lender: 'Sparkasse', rate: 3.25, amount: 30000000, fixedUntil: addMonths(start, 12 * 8, 30), sondertilgungPct: 5, interestCategoryId: cat('Kreditzinsen'), propertyAccountId: haus };
+    rule({ name: 'Rate Baufinanzierung', payee: 'Rate Baufinanzierung', accountId: giro, loanAccountId: bauf, amount: 125000, startDate: addDays(start, 29) });
     rule({ name: 'Strom', accountId: giro, amount: -9500, payee: 'Stadtwerke', categoryId: cat('Strom'), startDate: addDays(start, 14) });
     rule({ name: 'Internet', accountId: giro, amount: -3999, payee: 'Telekom', categoryId: cat('Internet & Telefon'), startDate: addDays(start, 9) });
     rule({ name: 'Rundfunkbeitrag', accountId: giro, amount: -5508, payee: 'ARD ZDF Deutschlandradio', categoryId: cat('Rundfunkbeitrag'), startDate: addDays(start, 14), unit: 'month', interval: 3 });
@@ -1077,7 +1229,8 @@
     // Wiederkehrend
     FREQUENCIES: FREQUENCIES, frequencyLabel: frequencyLabel, stepDate: stepDate, occurrences: occurrences,
     monthlyEquivalent: monthlyEquivalent, ruleKind: ruleKind, ruleAmount: ruleAmount, materializeRule: materializeRule,
-    processRecurring: processRecurring, dueConfirmations: dueConfirmations, bookNext: bookNext, skipNext: skipNext,
+    processRecurring: processRecurring, dueConfirmations: dueConfirmations, bookNext: bookNext,
+    loanDebt: loanDebt, loanSchedule: loanSchedule, loanStats: loanStats, loanRule: loanRule, loanRate: loanRate, skipNext: skipNext,
     upcoming: upcoming, forecastBalances: forecastBalances,
     // Konten
     findById: findById, effectOn: effectOn, isTransfer: isTransfer, isIncomeExpense: isIncomeExpense, txType: txType,

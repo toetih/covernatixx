@@ -326,10 +326,11 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       <a href="#buchungen" data-view="buchungen"><span class="k">2</span>Buchungen</a>
       <a href="#konten" data-view="konten"><span class="k">3</span>Konten</a>
       <a href="#depots" data-view="depots"><span class="k">4</span>Depots</a>
-      <a href="#wiederkehrend" data-view="wiederkehrend"><span class="k">5</span>Wiederkehrend</a>
-      <a href="#auswertung" data-view="auswertung"><span class="k">6</span>Auswertung</a>
-      <a href="#kategorien" data-view="kategorien"><span class="k">7</span>Kategorien &amp; Regeln</a>
-      <a href="#daten" data-view="daten"><span class="k">8</span>Daten &amp; Import</a>
+      <a href="#kredite" data-view="kredite"><span class="k">5</span>Kredite</a>
+      <a href="#wiederkehrend" data-view="wiederkehrend"><span class="k">6</span>Wiederkehrend</a>
+      <a href="#auswertung" data-view="auswertung"><span class="k">7</span>Auswertung</a>
+      <a href="#kategorien" data-view="kategorien"><span class="k">8</span>Kategorien &amp; Regeln</a>
+      <a href="#daten" data-view="daten"><span class="k">9</span>Daten &amp; Import</a>
     </nav>
     <div class="side-accounts" id="side-accounts"></div>
     <div class="side-foot" id="side-foot"></div>
@@ -582,13 +583,14 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
 
   function ruleKind(rule) {
     if (rule.securityId) return 'savingsplan';
+    if (rule.loanAccountId) return 'loan';
     if (rule.counterAccountId) return 'transfer';
     return rule.amount < 0 ? 'expense' : 'income';
   }
 
   /** Betrag der Regel aus Sicht von rule.accountId (Sparplan: negativ). */
   function ruleAmount(rule) {
-    if (rule.securityId) return -Math.abs(rule.amount);
+    if (rule.securityId || rule.loanAccountId) return -Math.abs(rule.amount);
     return rule.amount;
   }
 
@@ -610,6 +612,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       saveTrade(state, trade);
       return { trade: trade };
     }
+    if (rule.loanAccountId) return materializeLoanPayment(state, rule, dateIso, overrides);
     var t = {
       id: uid(),
       date: dateIso,
@@ -633,8 +636,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       if (!rule.active || rule.mode !== 'auto') return;
       var dates = occurrences(rule, today, 400);
       dates.forEach(function (d) {
-        materializeRule(state, rule, d);
-        created++;
+        if (materializeRule(state, rule, d)) created++;
       });
       if (dates.length) rule.nextDate = stepDate(rule, dates[dates.length - 1]);
       finishIfEnded(rule);
@@ -693,6 +695,18 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     state.recurring.forEach(function (rule) {
       if (!rule.active) return;
       occurrences(rule, toIso, 1000).forEach(function () {
+        if (rule.loanAccountId) {
+          // Zinsen auf die simulierte Restschuld, Rate höchstens bis zur Restschuld
+          var la = findById(state.accounts, rule.loanAccountId);
+          if (!la || bal[la.id] == null) return;
+          var debt = -bal[la.id];
+          if (debt <= 0) return;
+          var interest = Math.round(debt * loanRate(la) / 1200);
+          var pay = Math.min(Math.abs(rule.amount), debt + interest);
+          bal[la.id] += pay - interest;
+          if (bal[rule.accountId] != null) bal[rule.accountId] -= pay;
+          return;
+        }
         var amt = ruleAmount(rule);
         if (rule.accountId && bal[rule.accountId] != null) bal[rule.accountId] += amt;
         if (rule.counterAccountId && bal[rule.counterAccountId] != null) bal[rule.counterAccountId] -= amt;
@@ -700,6 +714,139 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       });
     });
     return bal;
+  }
+
+  // ---------------------------------------------------------------- Kredite (Annuitätendarlehen)
+  function loanRate(acc) { return (acc && acc.loan && acc.loan.rate) || 0; }
+
+  /** Restschuld (positiv) eines Darlehenskontos zum Stichtag. */
+  function loanDebt(state, loanId, asOf) {
+    return Math.max(0, -cashBalance(state, loanId, asOf));
+  }
+
+  /**
+   * Monatsrate buchen: Zinsen als Ausgabe auf dem Darlehenskonto (erhöhen die Schuld),
+   * Rate als Umbuchung vom Belastungskonto aufs Darlehenskonto (senkt die Schuld).
+   * So zeigt das Girokonto genau eine Abbuchung wie auf dem Kontoauszug.
+   */
+  function materializeLoanPayment(state, rule, dateIso, overrides) {
+    overrides = overrides || {};
+    var la = findById(state.accounts, rule.loanAccountId);
+    if (!la) return null;
+    var debt = loanDebt(state, la.id, dateIso);
+    if (debt <= 0) { rule.active = false; return null; }
+    var interest = overrides.interest != null ? overrides.interest : Math.round(debt * loanRate(la) / 1200);
+    var pay = Math.min(Math.abs(overrides.amount != null ? overrides.amount : rule.amount), debt + interest);
+    var res = {};
+    if (interest > 0) {
+      res.interest = {
+        id: uid(), date: dateIso, accountId: la.id, counterAccountId: null, amount: -interest,
+        payee: 'Zinsen ' + la.name, categoryId: (la.loan && la.loan.interestCategoryId) || null,
+        note: '', tags: [], recurringId: rule.id, loanPart: 'interest'
+      };
+      state.transactions.push(res.interest);
+    }
+    res.transaction = {
+      id: uid(), date: dateIso, accountId: rule.accountId, counterAccountId: la.id, amount: -pay,
+      payee: rule.payee || rule.name || ('Rate ' + la.name), categoryId: null,
+      note: overrides.note != null ? overrides.note : (rule.note || ''), tags: [], recurringId: rule.id, loanPart: 'payment'
+    };
+    state.transactions.push(res.transaction);
+    if (debt + interest - pay <= 0) rule.active = false;
+    return res;
+  }
+
+  /**
+   * Tilgungsplan ab einer Restschuld.
+   * opts: { debt (Cent), rate (% p.a.), payment (Cent/Monat), firstDate, anchorDay,
+   *         extra (Cent Sondertilgung je Jahr), extraMonth (1–12), rateAfter, fixedUntil, maxMonths }
+   * Rückgabe: { rows: [{date, interest, principal, extra, rest}], payoffDate, totalInterest, restAt(date) }
+   */
+  function loanSchedule(opts) {
+    var rows = [];
+    var rest = Math.max(0, opts.debt || 0);
+    var date = opts.firstDate;
+    var anchor = opts.anchorDay || parts(date).d;
+    var max = opts.maxMonths || 720;
+    var totalInterest = 0;
+    var rule = { unit: 'month', interval: 1, anchorDay: anchor };
+    var neverEnds = false;
+    for (var i = 0; i < max && rest > 0; i++) {
+      var rate = opts.fixedUntil && opts.rateAfter != null && date > opts.fixedUntil ? opts.rateAfter : opts.rate;
+      var interest = Math.round(rest * rate / 1200);
+      if (opts.payment <= interest) { neverEnds = true; break; }
+      var pay = Math.min(opts.payment, rest + interest);
+      var principal = pay - interest;
+      rest -= principal;
+      var extra = 0;
+      if (opts.extra && rest > 0 && parts(date).m === (opts.extraMonth || 12)) {
+        extra = Math.min(opts.extra, rest);
+        rest -= extra;
+      }
+      totalInterest += interest;
+      rows.push({ date: date, interest: interest, principal: principal, extra: extra, rest: rest });
+      date = stepDate(rule, date);
+    }
+    var last = rows[rows.length - 1];
+    return {
+      rows: rows,
+      payoffDate: last && last.rest <= 0 ? last.date : null,
+      neverEnds: neverEnds,
+      totalInterest: totalInterest,
+      restAt: function (iso) {
+        var r = opts.debt || 0;
+        for (var k = 0; k < rows.length && rows[k].date <= iso; k++) r = rows[k].rest;
+        return r;
+      }
+    };
+  }
+
+  /** Aktive Raten-Regel eines Darlehens (sonst die zuletzt angelegte). */
+  function loanRule(state, loanId) {
+    var found = null;
+    for (var i = 0; i < state.recurring.length; i++) {
+      var r = state.recurring[i];
+      if (r.loanAccountId !== loanId) continue;
+      if (r.active) return r;
+      found = r;
+    }
+    return found;
+  }
+
+  /** Kennzahlen eines Darlehens zum Stichtag. opts: { extra, extraMonth, rateAfter } */
+  function loanStats(state, loanId, today, opts) {
+    opts = opts || {};
+    var la = findById(state.accounts, loanId);
+    var cfg = (la && la.loan) || {};
+    var rule = loanRule(state, loanId);
+    var debt = loanDebt(state, loanId, today);
+    var interestYear = 0, interestTotal = 0, paidTotal = 0, extraTotal = 0;
+    var year = today.slice(0, 4);
+    state.transactions.forEach(function (t) {
+      if (t.date > today) return;
+      if (t.accountId === loanId && t.loanPart === 'interest') {
+        interestTotal -= t.amount;
+        if (t.date.slice(0, 4) === year) interestYear -= t.amount;
+      }
+      if (t.counterAccountId === loanId) {
+        paidTotal -= t.amount;
+        if (t.loanPart !== 'payment') extraTotal -= t.amount;
+      }
+    });
+    var active = rule && rule.active;
+    var sched = loanSchedule({
+      debt: debt, rate: cfg.rate || 0, payment: active ? Math.abs(rule.amount) : 0,
+      firstDate: active ? rule.nextDate : addMonths(today, 1), anchorDay: active ? rule.anchorDay : null,
+      extra: opts.extra || 0, extraMonth: opts.extraMonth || 12,
+      fixedUntil: cfg.fixedUntil || null, rateAfter: opts.rateAfter != null ? opts.rateAfter : null
+    });
+    return {
+      account: la, config: cfg, rule: rule, debt: debt,
+      interestYear: interestYear, interestTotal: interestTotal, paidTotal: paidTotal, extraTotal: extraTotal,
+      schedule: sched,
+      restAtFixedEnd: cfg.fixedUntil ? sched.restAt(cfg.fixedUntil) : null,
+      repaidShare: cfg.amount ? Math.max(0, Math.min(1, 1 - debt / cfg.amount)) : null
+    };
   }
 
   // ---------------------------------------------------------------- Hilfen
@@ -1211,6 +1358,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     bar: 'Bargeld',
     depot: 'Depot',
     darlehen: 'Kredit / Darlehen',
+    immobilie: 'Immobilie / Sachwert',
     sonstiges: 'Sonstiges'
   };
 
@@ -1218,7 +1366,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
 
   var DEFAULT_CATEGORIES = {
     expense: [
-      ['Wohnen', ['Miete / Kredit', 'Nebenkosten', 'Strom', 'Internet & Telefon', 'Rundfunkbeitrag', 'Einrichtung & Reparatur']],
+      ['Wohnen', ['Miete', 'Kreditzinsen', 'Nebenkosten', 'Strom', 'Internet & Telefon', 'Rundfunkbeitrag', 'Einrichtung & Reparatur']],
       ['Lebenshaltung', ['Lebensmittel', 'Drogerie', 'Kleidung', 'Haushalt']],
       ['Mobilität', ['Kraftstoff / Laden', 'Kfz-Versicherung', 'Kfz-Steuer', 'Werkstatt & Wartung', 'ÖPNV / Bahn', 'Parken']],
       ['Versicherungen', ['Haftpflicht', 'Hausrat', 'Berufsunfähigkeit', 'Kranken / Pflege', 'Rechtsschutz', 'Leben / Risiko']],
@@ -1344,6 +1492,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     var depot2 = acc('Aktien-Depot', 'depot', 'Geldanlage', 250000);
 
     var start = addMonths(startOfMonth(today), -5, 1);
+    function C_findAcc(id) { return findById(s.accounts, id); }
     function rule(o) {
       var r = Object.assign({ id: uid(), active: true, mode: 'auto', unit: 'month', interval: 1, tags: [], note: '' }, o);
       r.anchorDay = parts(r.startDate).d;
@@ -1352,7 +1501,11 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       return r;
     }
     rule({ name: 'Gehalt', accountId: giro, amount: 385000, payee: 'Arbeitgeber GmbH', categoryId: cat('Gehalt'), startDate: addDays(start, 26) });
-    rule({ name: 'Miete', accountId: giro, amount: -115000, payee: 'Vermieter', categoryId: cat('Miete / Kredit'), startDate: addDays(start, 2) });
+    // Baufinanzierung mit Haus
+    var haus = acc('Haus', 'immobilie', 'Immobilie', 42000000);
+    var bauf = acc('Baufinanzierung', 'darlehen', 'Immobilie', -27500000);
+    C_findAcc(bauf).loan = { lender: 'Sparkasse', rate: 3.25, amount: 30000000, fixedUntil: addMonths(start, 12 * 8, 30), sondertilgungPct: 5, interestCategoryId: cat('Kreditzinsen'), propertyAccountId: haus };
+    rule({ name: 'Rate Baufinanzierung', payee: 'Rate Baufinanzierung', accountId: giro, loanAccountId: bauf, amount: 125000, startDate: addDays(start, 29) });
     rule({ name: 'Strom', accountId: giro, amount: -9500, payee: 'Stadtwerke', categoryId: cat('Strom'), startDate: addDays(start, 14) });
     rule({ name: 'Internet', accountId: giro, amount: -3999, payee: 'Telekom', categoryId: cat('Internet & Telefon'), startDate: addDays(start, 9) });
     rule({ name: 'Rundfunkbeitrag', accountId: giro, amount: -5508, payee: 'ARD ZDF Deutschlandradio', categoryId: cat('Rundfunkbeitrag'), startDate: addDays(start, 14), unit: 'month', interval: 3 });
@@ -1422,7 +1575,8 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     // Wiederkehrend
     FREQUENCIES: FREQUENCIES, frequencyLabel: frequencyLabel, stepDate: stepDate, occurrences: occurrences,
     monthlyEquivalent: monthlyEquivalent, ruleKind: ruleKind, ruleAmount: ruleAmount, materializeRule: materializeRule,
-    processRecurring: processRecurring, dueConfirmations: dueConfirmations, bookNext: bookNext, skipNext: skipNext,
+    processRecurring: processRecurring, dueConfirmations: dueConfirmations, bookNext: bookNext,
+    loanDebt: loanDebt, loanSchedule: loanSchedule, loanStats: loanStats, loanRule: loanRule, loanRate: loanRate, skipNext: skipNext,
     upcoming: upcoming, forecastBalances: forecastBalances,
     // Konten
     findById: findById, effectOn: effectOn, isTransfer: isTransfer, isIncomeExpense: isIncomeExpense, txType: txType,
@@ -1692,6 +1846,9 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
   function writeSettingsUI() {
     try { localStorage.setItem('finanzen-ui', JSON.stringify({ tx: App.ui.tx, quick: App.ui.quick })); } catch (e) { /* ignore */ }
   }
+
+  /** Konten, die als „liquide“ zählen (Geld, keine Depots/Kredite/Sachwerte). */
+  App.isCashAccount = function (a) { return ['depot', 'darlehen', 'immobilie'].indexOf(a.type) < 0; };
 
   App.h = { $: $, $$: $$, esc: esc, money: money, today: today, acc: acc, cat: cat, accName: accName, catLabel: catLabel };
 
@@ -1967,6 +2124,13 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
         html += '<div class="banner"><span class="grow">Deine Daten liegen nur im Browser. Lege eine Datei als Speicherort an oder exportiere regelmäßig ein Backup.</span><a class="btn" href="#daten">Einrichten</a></div>';
       }
     }
+    s.accounts.forEach(function (a) {
+      if (a.type !== 'darlehen' || a.archived || !a.loan || !a.loan.fixedUntil) return;
+      var days = C.diffDays(today(), a.loan.fixedUntil);
+      if (days < 0 || days > 365 || !C.loanDebt(s, a.id, today())) return;
+      var st = C.loanStats(s, a.id, today());
+      html += '<div class="banner info"><span class="grow"><b>Zinsbindung „' + esc(a.name) + '“ endet am ' + C.formatDate(a.loan.fixedUntil) + '</b> (in ' + days + ' Tagen). Restschuld dann ca. ' + esc(C.formatMoney(st.restAtFixedEnd)) + ' – Zeit, Anschlussfinanzierung / Forward-Darlehen zu vergleichen.</span><a class="btn" href="#kredite">Zum Kredit</a></div>';
+    });
     if (s.meta.demo) {
       html += '<div class="banner info"><span class="grow">Du siehst <b>Beispieldaten</b>. Schau dich um – wenn du startklar bist, lösche sie und lege deine eigenen Konten an.</span><button class="btn" data-clear-demo>Beispieldaten löschen</button></div>';
     }
@@ -2043,7 +2207,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       if (a.type === 'depot') {
         depots += bal[a.id];
         C.holdings(s, a.id, t).forEach(function (h) { depotCost += h.cost; });
-      } else if (a.type !== 'darlehen') liquid += bal[a.id];
+      } else if (App.isCashAccount(a)) liquid += bal[a.id];
     });
     var depotHoldValue = 0;
     s.accounts.forEach(function (a) { if (a.type === 'depot' && !a.excludeFromNetWorth) depotHoldValue += C.depotValue(s, a.id, t); });
@@ -2053,7 +2217,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     var inc = rep.income[mk] || 0, exp = rep.expense[mk] || 0;
     var fc = C.forecastBalances(s, t, me);
     var fcLiquid = 0;
-    s.accounts.forEach(function (a) { if (!a.excludeFromNetWorth && a.type !== 'depot' && a.type !== 'darlehen') fcLiquid += fc[a.id]; });
+    s.accounts.forEach(function (a) { if (!a.excludeFromNetWorth && App.isCashAccount(a)) fcLiquid += fc[a.id]; });
 
     var html = '<div class="page-head"><div><h1>Übersicht</h1><div class="sub">' + esc(C.MONTHS_LONG[+t.slice(5, 7) - 1] + ' ' + t.slice(0, 4)) + ' · Stand ' + C.formatDate(t) + '</div></div>' +
       '<div class="actions"><button class="btn primary" data-act="new-tx">+ Buchung</button><button class="btn" data-act="new-transfer">⇄ Umbuchung</button></div></div>';
@@ -2147,6 +2311,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
   function kpi(l, v, s) { return '<div class="kpi"><div class="l">' + esc(l) + '</div><div class="v">' + v + '</div><div class="s">' + s + '</div></div>'; }
 
   function ruleAccountsLabel(r) {
+    if (r.loanAccountId) return accName(r.accountId) + ' → ' + accName(r.loanAccountId);
     if (r.securityId) return accName(r.accountId) + ' → ' + accName(r.depotId);
     if (r.counterAccountId) return accName(r.accountId) + ' → ' + accName(r.counterAccountId);
     return accName(r.accountId) + (r.categoryId ? ' · ' + C.categoryPath(App.state, r.categoryId) : '');
@@ -2627,7 +2792,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     var type = t ? (t.counterAccountId ? 'transfer' : (t.amount < 0 ? 'expense' : 'income')) : (preset.type || 'expense');
     var d = t ? Object.assign({}, t) : {
       date: today(), accountId: preset.accountId || App.ui.quick.accountId || (C.sortedAccounts(s, false)[0] || {}).id,
-      counterAccountId: null, amount: 0, payee: '', categoryId: null, note: '', tags: []
+      counterAccountId: preset.counterAccountId || null, amount: 0, payee: preset.payee || '', categoryId: null, note: '', tags: []
     };
     function body() {
       var tr = type === 'transfer';
@@ -2676,6 +2841,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
           };
           if (d.recurringId) rec.recurringId = d.recurringId;
           if (d.excludeFromReports && !rec.categoryId && type !== 'transfer') rec.excludeFromReports = true;
+          if (d.loanPart) rec.loanPart = d.loanPart;
           App.commit(isNew ? 'Buchung angelegt' : 'Buchung geändert', function (st) {
             var i = st.transactions.findIndex(function (x) { return x.id === rec.id; });
             if (i >= 0) st.transactions[i] = rec; else st.transactions.push(rec);
@@ -2906,7 +3072,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       if (map[k]) { e.preventDefault(); App.setQuickType(map[k]); return; }
     }
     if (typing || modalOpen || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (/^[1-8]$/.test(e.key)) {
+    if (/^[1-9]$/.test(e.key)) {
       var links = $$('#nav a');
       var l = links[+e.key - 1];
       if (l) { e.preventDefault(); location.hash = l.dataset.view; }
@@ -3266,10 +3432,10 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     var ids = App.accountFilterIds(f.account);
     var idSet = null;
     if (ids) { idSet = {}; ids.forEach(function (i) { idSet[i] = true; }); }
-    var rules = s.recurring.filter(function (r) { return !idSet || idSet[r.accountId] || idSet[r.counterAccountId] || idSet[r.depotId]; });
-    var groups = { income: [], expense: [], transfer: [], savingsplan: [], inactive: [] };
+    var rules = s.recurring.filter(function (r) { return !idSet || idSet[r.accountId] || idSet[r.counterAccountId] || idSet[r.depotId] || idSet[r.loanAccountId]; });
+    var groups = { income: [], expense: [], loan: [], transfer: [], savingsplan: [], inactive: [] };
     rules.forEach(function (r) { (r.active ? groups[C.ruleKind(r)] : groups.inactive).push(r); });
-    var sums = { income: 0, expense: 0, transfer: 0, savingsplan: 0 };
+    var sums = { income: 0, expense: 0, loan: 0, transfer: 0, savingsplan: 0 };
     Object.keys(sums).forEach(function (k) { groups[k].forEach(function (r) { sums[k] += C.monthlyEquivalent(r); }); });
 
     var html = '<div class="page-head"><div><h1>Wiederkehrende Buchungen</h1><div class="sub">Daueraufträge, Verträge, Abos, Gehalt, Sparpläne – werden automatisch gebucht oder dir zur Bestätigung vorgelegt.</div></div>' +
@@ -3277,13 +3443,14 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     html += '<div class="kpis">' +
       kpi('Feste Einnahmen / Monat', money(sums.income)) +
       kpi('Fixkosten / Monat', money(sums.expense)) +
+      (groups.loan.length ? kpi('Kreditraten / Monat', money(sums.loan)) : '') +
       kpi('Sparpläne / Monat', money(-sums.savingsplan)) +
-      kpi('Bleibt / Monat', money(sums.income + sums.expense + sums.savingsplan, { color: true })) +
+      kpi('Bleibt / Monat', money(sums.income + sums.expense + sums.loan + sums.savingsplan, { color: true })) +
       kpi('Fixkosten / Jahr', money(sums.expense * 12)) + '</div>';
     if (!rules.length) {
       html += '<div class="card"><div class="empty"><h3>Noch keine wiederkehrenden Buchungen</h3><p>Trag Miete, Gehalt, Versicherungen, Abos, Sparraten und Sparpläne einmal ein – sie werden dann automatisch gebucht.</p><button class="btn primary" data-act="new">Anlegen</button></div></div>';
     } else {
-      [['income', 'Einnahmen'], ['expense', 'Ausgaben'], ['transfer', 'Umbuchungen'], ['savingsplan', 'Sparpläne'], ['inactive', 'Pausiert / beendet']].forEach(function (g) {
+      [['income', 'Einnahmen'], ['expense', 'Ausgaben'], ['loan', 'Kreditraten'], ['transfer', 'Umbuchungen'], ['savingsplan', 'Sparpläne'], ['inactive', 'Pausiert / beendet']].forEach(function (g) {
         var list = groups[g[0]];
         if (!list.length) return;
         list.sort(function (a, b) {
@@ -3319,6 +3486,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
 
   App.editRule = function (r, preset) {
     var s = App.state;
+    if (r && r.loanAccountId && acc(r.loanAccountId)) return App.editLoan(acc(r.loanAccountId));
     if (!s.accounts.length) return App.toast('Bitte zuerst ein Konto anlegen.', { error: true });
     var isNew = !r;
     preset = preset || {};
@@ -3809,7 +3977,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     html += '<div class="card"><div class="card-head"><h2>Export &amp; Darstellung</h2></div><div class="card-body">' +
       '<div class="row mb"><button class="btn" data-act="export-csv">Alle Buchungen als CSV (Excel)</button></div>' +
       '<div class="row"><span>Farbschema</span><select data-act="theme"><option value="auto"' + sel('auto', s.settings.theme) + '>wie System</option><option value="light"' + sel('light', s.settings.theme) + '>hell</option><option value="dark"' + sel('dark', s.settings.theme) + '>dunkel</option></select></div>' +
-      '<hr class="sep"><div class="help"><b>Tastenkürzel</b><p><kbd>1</kbd>–<kbd>8</kbd> Bereiche · <kbd>N</kbd> neue Buchung · <kbd>/</kbd> Suche · <kbd>Strg</kbd>+<kbd>Z</kbd> rückgängig · <kbd>Esc</kbd> Dialog schließen</p>' +
+      '<hr class="sep"><div class="help"><b>Tastenkürzel</b><p><kbd>1</kbd>–<kbd>9</kbd> Bereiche · <kbd>N</kbd> neue Buchung · <kbd>/</kbd> Suche · <kbd>Strg</kbd>+<kbd>Z</kbd> rückgängig · <kbd>Esc</kbd> Dialog schließen</p>' +
       '<p>In der Schnelleingabe: <kbd>Enter</kbd> bucht · <kbd>Alt</kbd>+<kbd>A</kbd>/<kbd>E</kbd>/<kbd>U</kbd> Ausgabe/Einnahme/Umbuchung · „+50“ = Einnahme</p></div></div></div>';
     html += '</div>';
 
@@ -4128,6 +4296,276 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       created.cat++;
     }
     return sub.id;
+  }
+})();
+
+/* ================================================================ KREDITE */
+(function () {
+  'use strict';
+  var C = window.FinCore;
+  var App = window.App;
+  var H = App.h;
+  var $ = H.$, $$ = H.$$, esc = H.esc, money = H.money, today = H.today, acc = H.acc;
+
+  App.ui.loanSim = {};
+
+  function kpi(l, v, sub) { return '<div class="kpi"><div class="l">' + esc(l) + '</div><div class="v">' + v + '</div>' + (sub ? '<div class="s">' + sub + '</div>' : '') + '</div>'; }
+  function monthYear(iso) { return iso ? iso.slice(5, 7) + '/' + iso.slice(0, 4) : '–'; }
+  function duration(fromIso, toIso) {
+    if (!toIso) return '';
+    var m = (+toIso.slice(0, 4) - +fromIso.slice(0, 4)) * 12 + (+toIso.slice(5, 7) - +fromIso.slice(5, 7));
+    var y = Math.floor(m / 12), r = m % 12;
+    return (y ? y + ' J. ' : '') + (r ? r + ' M.' : (y ? '' : '0 M.'));
+  }
+  function pct(n) { return C.formatNumber(n, 3).replace(/,?0+$/, '') + ' %'; }
+
+  App.views.kredite = function (el) {
+    var s = App.state;
+    var t = today();
+    var loans = C.sortedAccounts(s, false).filter(function (a) { return a.type === 'darlehen'; });
+    var html = '<div class="page-head"><div><h1>Kredite</h1><div class="sub">Baufinanzierung und andere Annuitätendarlehen – Raten werden automatisch in Zinsen und Tilgung aufgeteilt.</div></div>' +
+      '<div class="actions"><button class="btn primary" data-act="new">+ Kredit</button></div></div>';
+    if (!loans.length) {
+      html += '<div class="card"><div class="empty"><h3>Noch kein Kredit erfasst</h3>' +
+        '<p>Du brauchst aus deinem Darlehensvertrag bzw. dem letzten Kontoauszug: <b>aktuelle Restschuld, Sollzins, Monatsrate, Ende der Zinsbindung</b>.<br>' +
+        'Die Rate wird dann jeden Monat automatisch gebucht: Zinsen als Ausgabe, Tilgung als Vermögensaufbau.</p>' +
+        '<button class="btn primary" data-act="new">Kredit anlegen</button></div></div>';
+      el.innerHTML = html;
+      el.onclick = function (e) { if (e.target.closest('[data-act="new"]')) App.editLoan(null); };
+      return;
+    }
+    var totalDebt = 0, totalRate = 0, totalInterestYear = 0;
+    var stats = loans.map(function (a) {
+      var sim = App.ui.loanSim[a.id] || (App.ui.loanSim[a.id] = { extra: '', month: 12, rateAfter: '' });
+      var base = C.loanStats(s, a.id, t);
+      var extra = Math.abs(C.parseMoney(sim.extra)) || 0;
+      var rateAfter = C.parseDecimal(sim.rateAfter);
+      var simOpts = { extra: extra, extraMonth: +sim.month || 12, rateAfter: isNaN(rateAfter) ? null : rateAfter };
+      var withSim = (extra || simOpts.rateAfter != null) ? C.loanStats(s, a.id, t, simOpts) : base;
+      totalDebt += base.debt;
+      totalInterestYear += base.interestYear;
+      if (base.rule && base.rule.active) totalRate += Math.abs(base.rule.amount);
+      return { a: a, base: base, sim: withSim, simIn: sim, hasSim: withSim !== base, extra: extra };
+    });
+    if (loans.length > 1) {
+      html += '<div class="kpis">' + kpi('Restschuld gesamt', money(totalDebt)) + kpi('Raten / Monat', money(totalRate)) + kpi('Zinsen ' + t.slice(0, 4), money(totalInterestYear)) + '</div>';
+    }
+    stats.forEach(function (x) { html += loanCard(x, t); });
+    el.innerHTML = html;
+    App.bindChartTips(el);
+
+    el.onclick = function (e) {
+      var b = e.target.closest('[data-act]');
+      if (!b) return;
+      var id = b.dataset.id, a = id ? acc(id) : null;
+      var act = b.dataset.act;
+      if (act === 'new') App.editLoan(null);
+      else if (act === 'edit') App.editLoan(a);
+      else if (act === 'reconcile') App.reconcile(id);
+      else if (act === 'bookings') App.go('buchungen', { tx: { account: id, period: 'all', cat: '', type: '', q: '', tag: '' } });
+      else if (act === 'extra') {
+        var r = C.loanRule(s, id);
+        App.editTransaction(null, { type: 'transfer', accountId: r ? r.accountId : null, counterAccountId: id, payee: 'Sondertilgung ' + a.name });
+      }
+    };
+    $$('[data-sim]', el).forEach(function (inp) {
+      var timer;
+      inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input', function () {
+        clearTimeout(timer);
+        timer = setTimeout(function () {
+          var id = inp.dataset.id, key = inp.dataset.sim;
+          App.ui.loanSim[id][key] = inp.value;
+          var pos = inp.selectionStart;
+          App.render();
+          var again = $('[data-sim="' + key + '"][data-id="' + id + '"]');
+          if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch (err) { /* select */ } }
+        }, inp.tagName === 'SELECT' ? 0 : 350);
+      });
+    });
+  };
+
+  function loanCard(x, t) {
+    var s = App.state;
+    var a = x.a, st = x.base, sim = x.sim, cfg = st.config;
+    var rule = st.rule && st.rule.active ? st.rule : null;
+    var sched = st.schedule;
+    var h = '<div class="card"><div class="card-head"><div><h2>' + esc(a.name) + '</h2><div class="help">' +
+      esc([cfg.lender, rule ? 'Rate von ' + H.accName(rule.accountId) + ' am ' + C.parts(rule.nextDate).d + '.' : 'keine Rate hinterlegt'].filter(Boolean).join(' · ')) + '</div></div>' +
+      '<div class="actions"><button class="btn small" data-act="extra" data-id="' + a.id + '">Sondertilgung</button><button class="btn small" data-act="reconcile" data-id="' + a.id + '" title="Restschuld laut Bank abgleichen">Abgleichen</button>' +
+      '<button class="btn small" data-act="bookings" data-id="' + a.id + '">Buchungen</button><button class="btn small" data-act="edit" data-id="' + a.id + '">Bearbeiten</button></div></div>';
+    if (!st.debt) {
+      return h + '<div class="empty"><h3>Abbezahlt 🎉</h3><p>Insgesamt gezahlte Zinsen: ' + esc(C.formatMoney(st.interestTotal)) + '. Du kannst das Konto unter Konten archivieren.</p></div></div>';
+    }
+    var fixedDays = cfg.fixedUntil ? C.diffDays(t, cfg.fixedUntil) : null;
+    h += '<div class="card-body"><div class="kpis">' +
+      kpi('Restschuld', money(st.debt), st.repaidShare != null ? C.formatPercent(st.repaidShare).replace('+', '') + ' von ' + esc(C.formatMoney(cfg.amount)) + ' getilgt' : '') +
+      kpi('Sollzins', esc(pct(cfg.rate || 0)), cfg.fixedUntil ? 'gebunden bis ' + C.formatDate(cfg.fixedUntil) : 'keine Zinsbindung hinterlegt') +
+      kpi('Monatsrate', rule ? money(Math.abs(rule.amount)) : '–', rule && sched.rows[0] ? 'davon Tilgung ' + esc(C.formatMoney(sched.rows[0].principal)) : '') +
+      kpi('Schuldenfrei', sched.neverEnds ? '<span class="neg">nie</span>' : esc(monthYear(sched.payoffDate)), sched.neverEnds ? 'Rate deckt die Zinsen nicht' : (sched.payoffDate ? 'in ' + esc(duration(t, sched.payoffDate)) + ' (bei gleichem Zins)' : '')) +
+      (cfg.fixedUntil ? kpi('Restschuld Ende Zinsbindung', fixedDays < 0 ? '<span class="muted">abgelaufen</span>' : money(st.restAtFixedEnd), fixedDays < 0 ? 'Zinssatz aktualisieren (Bearbeiten)' : 'in ' + esc(duration(t, cfg.fixedUntil))) : '') +
+      kpi('Zinsen ' + t.slice(0, 4), money(st.interestYear), 'bisher gesamt erfasst ' + esc(C.formatMoney(st.interestTotal))) +
+      '</div>';
+    if (st.repaidShare != null) {
+      h += '<div class="bar-track mt" title="getilgt" style="height:12px"><span class="bar-fill" style="display:block;width:' + (st.repaidShare * 100).toFixed(1) + '%;background:var(--series-1)"></span></div>';
+    }
+    // Immobilie / Eigenkapital
+    if (cfg.propertyAccountId && acc(cfg.propertyAccountId)) {
+      var prop = acc(cfg.propertyAccountId);
+      var value = C.accountBalance(s, prop.id, t);
+      var debtAll = 0;
+      s.accounts.forEach(function (o) { if (o.type === 'darlehen' && o.loan && o.loan.propertyAccountId === prop.id) debtAll += C.loanDebt(s, o.id, t); });
+      h += '<div class="summary-line" style="padding-left:0;border:0;margin-top:8px"><span>' + esc(prop.name) + ': Wert <b>' + esc(C.formatMoney(value)) + '</b></span><span>Eigenkapital <b>' + esc(C.formatMoney(value - debtAll)) + '</b></span>' +
+        (value ? '<span>Beleihung <b>' + esc(C.formatPercent(debtAll / value).replace('+', '')) + '</b></span>' : '') + '<span class="help">Wert anpassen: Konten › ' + esc(prop.name) + ' › Abgleichen</span></div>';
+    }
+    h += '</div>';
+
+    // Verlauf + Rechner
+    var rows = sim.schedule.rows;
+    var pts = [{ label: t.slice(0, 4), value: st.debt, sub: 'heute' }];
+    rows.forEach(function (r, i) {
+      if (C.parts(r.date).m === 12 || i === rows.length - 1) pts.push({ label: r.date.slice(0, 4), value: r.rest, sub: C.formatDate(r.date) });
+    });
+    if (pts.length > 1 && pts[1].label === pts[0].label) pts.splice(0, 1);
+    var sd = sim.schedule, bd = st.schedule;
+    var saved = bd.totalInterest - sd.totalInterest;
+    var monthsSaved = bd.payoffDate && sd.payoffDate ? (+bd.payoffDate.slice(0, 4) - +sd.payoffDate.slice(0, 4)) * 12 + (+bd.payoffDate.slice(5, 7) - +sd.payoffDate.slice(5, 7)) : 0;
+    var sp = x.simIn;
+    h += '<div class="grid two" style="padding:0 16px 16px">' +
+      '<div><div class="bold mb">Restschuld-Verlauf' + (x.hasSim ? ' <span class="badge accent">mit Rechner-Werten</span>' : '') + '</div>' + (pts.length > 1 ? App.lineChart(pts) : '<div class="empty">Keine Rate hinterlegt.</div>') + '</div>' +
+      '<div><div class="bold mb">Was wäre wenn …</div><div class="form-grid" style="grid-template-columns:190px 1fr">' +
+      '<label>Sondertilgung pro Jahr</label><div class="row"><input type="text" class="amount" data-sim="extra" data-id="' + a.id + '" value="' + esc(sp.extra) + '" placeholder="0,00 €" style="width:120px">' +
+      '<select data-sim="month" data-id="' + a.id + '">' + C.MONTHS_LONG.map(function (m, i) { return '<option value="' + (i + 1) + '"' + (+sp.month === i + 1 ? ' selected' : '') + '>im ' + m + '</option>'; }).join('') + '</select></div>' +
+      (cfg.sondertilgungPct && cfg.amount ? '<span></span><div class="hint" style="margin-top:-6px">Laut Vertrag erlaubt: ' + esc(pct(cfg.sondertilgungPct)) + ' = ' + esc(C.formatMoney(Math.round(cfg.amount * cfg.sondertilgungPct / 100))) + ' pro Jahr</div>' : '') +
+      (cfg.fixedUntil ? '<label>Zins nach Zinsbindung</label><div class="row"><input type="text" class="amount" data-sim="rateAfter" data-id="' + a.id + '" value="' + esc(sp.rateAfter) + '" placeholder="' + esc(C.formatNumber(cfg.rate || 0, 3)) + '" style="width:90px"> %</div>' : '') +
+      '</div>' +
+      '<table class="tbl mt"><tbody>' +
+      '<tr><td>Schuldenfrei</td><td class="num bold">' + (sd.neverEnds ? '<span class="neg">nie</span>' : esc(monthYear(sd.payoffDate))) + (x.hasSim && monthsSaved > 0 ? ' <span class="pos">(' + esc(duration('2000-01-01', C.addMonths('2000-01-01', monthsSaved))) + ' früher)</span>' : '') + '</td></tr>' +
+      '<tr><td>Zinsen bis zum Ende</td><td class="num bold">' + esc(C.formatMoney(sd.totalInterest)) + (x.hasSim && saved ? ' <span class="' + (saved > 0 ? 'pos' : 'neg') + '">(' + esc(C.formatMoney(Math.abs(saved))) + (saved > 0 ? ' gespart' : ' mehr') + ')</span>' : '') + '</td></tr>' +
+      (cfg.fixedUntil ? '<tr><td>Restschuld ' + C.formatDate(cfg.fixedUntil) + '</td><td class="num bold">' + esc(C.formatMoney(sim.restAtFixedEnd)) + '</td></tr>' : '') +
+      '</tbody></table><div class="help mt">Nur eine Rechnung – gebucht wird nichts. Eine echte Sondertilgung erfasst du mit dem Button oben.</div></div></div>';
+
+    // Tilgungsplan pro Jahr
+    var years = {};
+    rows.forEach(function (r) {
+      var y = r.date.slice(0, 4);
+      var o = years[y] || (years[y] = { interest: 0, principal: 0, extra: 0, rest: 0 });
+      o.interest += r.interest; o.principal += r.principal; o.extra += r.extra; o.rest = r.rest;
+    });
+    var ys = Object.keys(years).sort();
+    if (ys.length) {
+      h += '<details class="card-body" style="border-top:1px solid var(--border)"><summary class="bold" style="cursor:pointer">Tilgungsplan (' + ys.length + ' Jahre)' + (x.hasSim ? ' – mit Rechner-Werten' : '') + '</summary>' +
+        '<div class="tbl-wrap mt" style="max-height:420px"><table class="tbl"><thead><tr><th>Jahr</th><th class="num">Zinsen</th><th class="num">Tilgung</th><th class="num">Sondertilgung</th><th class="num">Restschuld Jahresende</th></tr></thead><tbody>' +
+        ys.map(function (y) {
+          var o = years[y];
+          var fixedEnd = cfg.fixedUntil && cfg.fixedUntil.slice(0, 4) === y;
+          return '<tr' + (fixedEnd ? ' class="bold"' : '') + '><td>' + y + (fixedEnd ? ' <span class="badge warn">Ende Zinsbindung</span>' : '') + '</td><td class="num">' + esc(C.formatMoney(o.interest)) + '</td><td class="num">' + esc(C.formatMoney(o.principal)) + '</td><td class="num">' + (o.extra ? esc(C.formatMoney(o.extra)) : '<span class="muted">–</span>') + '</td><td class="num bold">' + esc(C.formatMoney(o.rest)) + '</td></tr>';
+        }).join('') + '</tbody></table></div><div class="help mt">Berechnet ab heutiger Restschuld mit Monatsrate und Sollzins (Zinsen monatlich auf die Restschuld). Kleine Abweichungen zur Bank durch Zinsmethode und Buchungstage sind normal – über „Abgleichen“ korrigierst du die Restschuld.</div></details>';
+    }
+    return h + '</div>';
+  }
+
+  /** Kredit anlegen / bearbeiten: Darlehenskonto + Raten-Regel (+ optional Immobilie). */
+  App.editLoan = function (a) {
+    var s = App.state;
+    var isNew = !a;
+    var cfg = (a && a.loan) || {};
+    var rule = a ? C.loanRule(s, a.id) : null;
+    var cashFilter = function (x) { return App.isCashAccount(x); };
+    var props = s.accounts.filter(function (x) { return x.type === 'immobilie'; });
+    var groups = C.accountGroups(s).filter(Boolean);
+    if (groups.indexOf('Immobilie') < 0) groups.push('Immobilie');
+    var defaultNext = C.addMonths(C.startOfMonth(today()), 1, 1);
+    var body = '<div class="form-grid">' +
+      '<label>Bezeichnung</label><input type="text" name="name" value="' + esc(a ? a.name : '') + '" placeholder="z. B. Baufinanzierung Sparkasse" autofocus>' +
+      '<label>Bank</label><input type="text" name="lender" value="' + esc(cfg.lender || '') + '" placeholder="optional">' +
+      '<label>Gruppe</label><input type="text" name="group" list="dl-lgroups" value="' + esc(a ? a.group || '' : 'Immobilie') + '"><datalist id="dl-lgroups">' + groups.map(function (g) { return '<option value="' + esc(g) + '">'; }).join('') + '</datalist>' +
+      '<label>Darlehensbetrag</label><input type="text" name="amount" class="amount" value="' + (cfg.amount ? esc(C.formatAmountInput(cfg.amount)) : '') + '" placeholder="ursprünglich, optional">' +
+      (isNew ? '<label>Aktuelle Restschuld</label><input type="text" name="debt" class="amount" placeholder="laut letztem Kontoauszug">' +
+        '<span></span><div class="hint">Stand <b>vor</b> der nächsten Rate. Später korrigierst du sie über „Abgleichen“.</div>' : '') +
+      '<label>Sollzins (% p. a.)</label><input type="text" name="rate" class="amount" value="' + (cfg.rate != null ? esc(C.formatNumber(cfg.rate, 3)) : '') + '" placeholder="z. B. 3,45">' +
+      '<label>Monatsrate</label><input type="text" name="payment" class="amount" value="' + (rule ? esc(C.formatAmountInput(Math.abs(rule.amount))) : '') + '" placeholder="Zins + Tilgung">' +
+      '<label>Nächste Rate am</label><input type="date" name="nextDate" value="' + esc(rule && rule.active ? rule.nextDate : defaultNext) + '">' +
+      '<label>Abbuchung von</label><select name="payFrom">' + App.accountOptions(rule ? rule.accountId : App.ui.quick.accountId, { filter: cashFilter }) + '</select>' +
+      '<label>Zinsbindung bis</label><input type="date" name="fixedUntil" value="' + esc(cfg.fixedUntil || '') + '">' +
+      '<label>Sondertilgung erlaubt</label><div class="row"><input type="text" class="amount" name="stPct" value="' + (cfg.sondertilgungPct ? esc(C.formatNumber(cfg.sondertilgungPct, 2)) : '') + '" placeholder="z. B. 5" style="width:80px"> % vom Darlehensbetrag pro Jahr</div>' +
+      '<label>Zinsen buchen auf</label><select name="interestCat">' + App.categoryOptions(cfg.interestCategoryId || '', { type: 'expense', empty: isNew ? '＋ Kategorie „Kreditzinsen“ anlegen' : '– keine Kategorie –' }) + '</select>' +
+      '<label>Immobilie</label><select name="property"><option value="">– keine –</option>' + props.map(function (p) { return '<option value="' + p.id + '"' + (cfg.propertyAccountId === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>'; }).join('') + '<option value="__new">＋ Immobilie als Vermögenswert anlegen …</option></select>' +
+      '<div class="full" id="prop-new" style="display:none;border:1px dashed var(--border-strong);border-radius:6px;padding:10px"><div class="form-grid">' +
+      '<label>Name</label><input type="text" name="propName" placeholder="z. B. Haus Musterstraße">' +
+      '<label>Geschätzter Wert</label><input type="text" name="propValue" class="amount" placeholder="Marktwert heute"></div>' +
+      '<div class="help mt">Erscheint als Konto vom Typ „Immobilie“ im Nettovermögen. Den Wert passt du ab und zu über „Abgleichen“ an.</div></div>' +
+      '</div>';
+    var form = App.modal({
+      title: isNew ? 'Kredit anlegen' : 'Kredit bearbeiten', body: body, wide: false,
+      onSubmit: function (form) {
+        var f = form.elements;
+        var name = f.name.value.trim();
+        var rate = C.parseDecimal(f.rate.value);
+        var payment = Math.abs(C.parseMoney(f.payment.value));
+        var debt = isNew ? Math.abs(C.parseMoney(f.debt.value)) : 0;
+        var amount = Math.abs(C.parseMoney(f.amount.value)) || 0;
+        var stPct = C.parseDecimal(f.stPct.value);
+        if (!name) { f.name.focus(); return false; }
+        if (isNew && (isNaN(debt) || !debt)) { f.debt.classList.add('invalid'); f.debt.focus(); return false; }
+        if (isNaN(rate) || rate < 0) { f.rate.classList.add('invalid'); f.rate.focus(); return false; }
+        if (isNaN(payment) || !payment) { f.payment.classList.add('invalid'); f.payment.focus(); return false; }
+        if (!f.nextDate.value) { f.nextDate.focus(); return false; }
+        if (f.property.value === '__new' && !f.propName.value.trim()) { f.propName.focus(); return false; }
+        var checkDebt = isNew ? debt : C.loanDebt(s, a.id, today());
+        if (checkDebt && payment <= Math.round(checkDebt * rate / 1200)) {
+          App.toast('Die Rate deckt nicht einmal die Zinsen (' + C.formatMoney(Math.round(checkDebt * rate / 1200)) + ' pro Monat). Bitte prüfen.', { error: true });
+          return false;
+        }
+        var created = 0;
+        App.commit(isNew ? 'Kredit angelegt' : 'Kredit geändert', function (st) {
+          var catId = f.interestCat.value || null;
+          if (isNew && !catId) catId = ensureInterestCategory(st);
+          var propId = f.property.value || null;
+          if (propId === '__new') {
+            var pv = Math.abs(C.parseMoney(f.propValue.value)) || 0;
+            var prop = { id: C.uid(), name: f.propName.value.trim(), type: 'immobilie', group: f.group.value.trim(), opening: pv, order: st.accounts.length, archived: false, note: '' };
+            st.accounts.push(prop);
+            propId = prop.id;
+          }
+          var loanAcc = isNew ? { id: C.uid(), type: 'darlehen', opening: -debt, order: st.accounts.length, archived: false, note: '' } : C.findById(st.accounts, a.id);
+          loanAcc.name = name;
+          loanAcc.group = f.group.value.trim();
+          loanAcc.loan = Object.assign({}, loanAcc.loan || {}, {
+            lender: f.lender.value.trim(), rate: rate, amount: amount || (isNew ? debt : 0), fixedUntil: f.fixedUntil.value || null,
+            sondertilgungPct: isNaN(stPct) ? 0 : stPct, interestCategoryId: catId, propertyAccountId: propId
+          });
+          if (isNew) st.accounts.push(loanAcc);
+          var r = C.loanRule(st, loanAcc.id);
+          var next = f.nextDate.value;
+          if (!r) {
+            r = { id: C.uid(), unit: 'month', interval: 1, mode: 'auto', tags: [], note: '', startDate: next };
+            st.recurring.push(r);
+          }
+          var nextChanged = r.nextDate !== next;
+          Object.assign(r, {
+            name: 'Rate ' + name, payee: 'Rate ' + name, accountId: f.payFrom.value, loanAccountId: loanAcc.id,
+            counterAccountId: null, categoryId: null, amount: payment, nextDate: next, active: true
+          });
+          if (nextChanged || !r.anchorDay) r.anchorDay = C.parts(next).d;
+          created = C.processRecurring(st, today());
+        });
+        App.toast((isNew ? 'Kredit angelegt.' : 'Gespeichert.') + (created ? ' ' + created + ' fällige Raten gebucht.' : ''), { undo: true });
+        if (App.view !== 'kredite') App.go('kredite');
+      }
+    });
+    form.elements.property.addEventListener('change', function () {
+      $('#prop-new', form).style.display = this.value === '__new' ? 'block' : 'none';
+      if (this.value === '__new') form.elements.propName.focus();
+    });
+  };
+
+  function ensureInterestCategory(st) {
+    var hit = st.categories.find(function (c) { return c.type === 'expense' && /kreditzins|darlehenszins|bauzins/i.test(c.name); });
+    if (hit) return hit.id;
+    var wohnen = st.categories.find(function (c) { return c.type === 'expense' && !c.parentId && /^wohnen/i.test(c.name); });
+    var c = { id: C.uid(), name: 'Kreditzinsen', parentId: wohnen ? wohnen.id : null, type: 'expense', color: wohnen ? wohnen.color : C.PALETTE[0], budget: 0 };
+    st.categories.push(c);
+    return c.id;
   }
 })();
 

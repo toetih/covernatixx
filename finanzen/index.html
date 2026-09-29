@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Finanzen</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232f6fdb'/><path d='M8 22V10h11M8 16h8' stroke='white' stroke-width='3' fill='none' stroke-linecap='round'/></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <span class="brand-logo" aria-hidden="true">F</span>
+      <span class="brand-name">Finanzen</span>
+    </div>
+    <nav class="nav" id="nav">
+      <a href="#uebersicht" data-view="uebersicht"><span class="k">1</span>Übersicht</a>
+      <a href="#buchungen" data-view="buchungen"><span class="k">2</span>Buchungen</a>
+      <a href="#konten" data-view="konten"><span class="k">3</span>Konten</a>
+      <a href="#depots" data-view="depots"><span class="k">4</span>Depots</a>
+      <a href="#wiederkehrend" data-view="wiederkehrend"><span class="k">5</span>Wiederkehrend</a>
+      <a href="#auswertung" data-view="auswertung"><span class="k">6</span>Auswertung</a>
+      <a href="#kategorien" data-view="kategorien"><span class="k">7</span>Kategorien &amp; Regeln</a>
+      <a href="#daten" data-view="daten"><span class="k">8</span>Daten &amp; Import</a>
+    </nav>
+    <div class="side-accounts" id="side-accounts"></div>
+    <div class="side-foot" id="side-foot"></div>
+  </aside>
+  <main class="main">
+    <div id="banner"></div>
+    <div id="view"></div>
+  </main>
+</div>
+<div id="modal-root"></div>
+<div id="toast-root" aria-live="polite"></div>
+<noscript><p style="padding:2rem">Diese Anwendung benötigt JavaScript.</p></noscript>
+<script src="core.js"></script>
+<script src="store.js"></script>
+<script src="app.js"></script>
+<script src="views.js"></script>
+</body>
+</html>

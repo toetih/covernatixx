@@ -426,6 +426,33 @@
     return bal;
   }
 
+  /** Bargeld-Stand eines Kontos zum Stichtag (bei Depots ohne Wertpapiere). */
+  function cashBalance(state, accountId, asOf) {
+    var acc = findById(state.accounts, accountId);
+    if (!acc) return 0;
+    return accountBalance(state, accountId, asOf) - (acc.type === 'depot' ? depotValue(state, accountId, asOf) : 0);
+  }
+
+  /**
+   * Abgleich auf einen echten Kontostand zum Datum.
+   * mode 'opening': Anfangsbestand so verschieben, dass es passt (für nachgetragene alte Buchungen –
+   *                 der gesamte Verlauf verschiebt sich mit, keine Korrekturbuchung).
+   * mode 'booking': Korrekturbuchung am Datum (zählt nicht in Auswertungen).
+   * Gibt die Differenz in Cent zurück (0 = passte schon).
+   */
+  function reconcileAccount(state, accountId, dateIso, realCents, mode) {
+    var acc = findById(state.accounts, accountId);
+    if (!acc) return 0;
+    var diff = realCents - cashBalance(state, accountId, dateIso);
+    if (!diff) return 0;
+    if (mode === 'opening') acc.opening = (acc.opening || 0) + diff;
+    else state.transactions.push({
+      id: uid(), date: dateIso, accountId: accountId, counterAccountId: null, amount: diff,
+      payee: 'Saldo-Korrektur', categoryId: null, note: 'Abgleich auf ' + formatMoney(realCents), tags: [], excludeFromReports: true
+    });
+    return diff;
+  }
+
   function netWorth(state, asOf, balances) {
     var bal = balances || allBalances(state, asOf);
     var sum = 0;
@@ -914,7 +941,11 @@
       if (!a.type) a.type = 'giro';
       if (a.opening == null) a.opening = 0;
     });
-    s.transactions.forEach(function (t) { if (!Array.isArray(t.tags)) t.tags = t.tags ? String(t.tags).split(',').map(trim).filter(Boolean) : []; });
+    s.transactions.forEach(function (t) {
+      if (!Array.isArray(t.tags)) t.tags = t.tags ? String(t.tags).split(',').map(trim).filter(Boolean) : [];
+      // ältere Korrekturbuchungen nicht in Auswertungen zählen
+      if (t.payee === 'Saldo-Korrektur' && !t.categoryId && !t.counterAccountId) t.excludeFromReports = true;
+    });
     s.securities.forEach(function (x) { if (!Array.isArray(x.prices)) x.prices = []; });
     s.recurring.forEach(function (r) {
       if (!r.unit) r.unit = 'month';
@@ -1050,7 +1081,7 @@
     upcoming: upcoming, forecastBalances: forecastBalances,
     // Konten
     findById: findById, effectOn: effectOn, isTransfer: isTransfer, isIncomeExpense: isIncomeExpense, txType: txType,
-    accountBalance: accountBalance, allBalances: allBalances, netWorth: netWorth, netWorthHistory: netWorthHistory,
+    accountBalance: accountBalance, allBalances: allBalances, cashBalance: cashBalance, reconcileAccount: reconcileAccount, netWorth: netWorth, netWorthHistory: netWorthHistory,
     sortedAccounts: sortedAccounts, accountGroups: accountGroups, ACCOUNT_TYPES: ACCOUNT_TYPES,
     // Depots
     TRADE_TYPES: TRADE_TYPES, SECURITY_KINDS: SECURITY_KINDS, tradeCashEffect: tradeCashEffect, latestPrice: latestPrice,

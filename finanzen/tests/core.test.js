@@ -222,3 +222,23 @@ test('CSV-Zuordnung Finanzguru-ähnlicher Export', () => {
   assert.equal(m.category, 9);
   assert.equal(m.subcategory, 10);
 });
+
+test('Abgleich: alte Buchungen nachtragen und Anfangsbestand anpassen', () => {
+  const s = baseState();
+  // Konto wurde heute mit 1.000 € angelegt, dann alte Buchungen nachgetragen
+  s.transactions.push({ id: 'o1', date: '2025-01-10', accountId: 'giro', amount: -30000, tags: [] });
+  s.transactions.push({ id: 'o2', date: '2025-02-10', accountId: 'giro', amount: 50000, tags: [] });
+  assert.equal(C.accountBalance(s, 'giro', '2025-06-01'), 120000);
+  const diff = C.reconcileAccount(s, 'giro', '2025-06-01', 100000, 'opening');
+  assert.equal(diff, -20000);
+  assert.equal(s.accounts[0].opening, 80000);
+  assert.equal(C.accountBalance(s, 'giro', '2025-06-01'), 100000);
+  assert.equal(C.accountBalance(s, 'giro', '2025-01-31'), 50000);
+  assert.equal(s.transactions.length, 2);
+  // Korrekturbuchung zählt nicht in Auswertungen
+  C.reconcileAccount(s, 'giro', '2025-06-02', 99000, 'booking');
+  assert.equal(C.accountBalance(s, 'giro', '2025-06-02'), 99000);
+  const rep = C.categoryReport(s, { from: '2025-06-01', to: '2025-06-30' });
+  assert.equal(rep.expense['2025-06'], 0);
+  assert.equal(C.reconcileAccount(s, 'giro', '2025-06-02', 99000, 'booking'), 0);
+});

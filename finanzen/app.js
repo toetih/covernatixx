@@ -806,7 +806,7 @@
           '<td class="nowrap">' + C.formatDate(t.date) + '</td>' +
           (singleAcc ? '' : '<td class="nowrap">' + esc(isT ? accName(t.accountId) : accName(t.accountId)) + '</td>') +
           '<td>' + desc + tags + icons + '</td>' +
-          '<td>' + (isT ? '<span class="badge">Umbuchung</span>' : (t.tradeId && t.tradeType !== 'dividend' ? '<span class="badge">Wertpapier</span>' : catLabel(t.categoryId))) + '</td>' +
+          '<td>' + (isT ? '<span class="badge">Umbuchung</span>' : (t.tradeId && t.tradeType !== 'dividend' ? '<span class="badge">Wertpapier</span>' : (t.excludeFromReports ? '<span class="badge" title="zählt nicht in Auswertungen">Korrektur</span>' : catLabel(t.categoryId)))) + '</td>' +
           '<td class="num bold">' + (amt == null ? '<span class="muted">' + esc(C.formatMoney(Math.abs(t.amount))) + '</span>' : money(amt, { color: true })) + '</td>' +
           (showBal ? '<td class="num">' + money(balMap[t.id]) + '</td>' : '') + '</tr>';
       });
@@ -1036,6 +1036,7 @@
             note: d.note, tags: d.tags
           };
           if (d.recurringId) rec.recurringId = d.recurringId;
+          if (d.excludeFromReports && !rec.categoryId && type !== 'transfer') rec.excludeFromReports = true;
           App.commit(isNew ? 'Buchung angelegt' : 'Buchung geändert', function (st) {
             var i = st.transactions.findIndex(function (x) { return x.id === rec.id; });
             if (i >= 0) st.transactions[i] = rec; else st.transactions.push(rec);
@@ -1126,7 +1127,7 @@
       });
       html += '<tr class="sum-row"><td colspan="4">Nettovermögen</td><td class="num">' + money(C.netWorth(s, t, bal)) + '</td><td></td></tr>';
       html += '</tbody></table></div></div>';
-      html += '<div class="help mt"><p><b>Abgleichen:</b> Du gibst den echten Kontostand laut Bank ein – die Differenz wird als Korrekturbuchung erfasst. So bleibt alles stimmig, auch wenn du mal nicht jede Kleinigkeit einträgst.</p></div>';
+      html += '<div class="help mt"><p><b>Abgleichen:</b> Du gibst den echten Kontostand laut Bank ein. Hast du <b>alte Buchungen nachgetragen</b>, wähle „Anfangsbestand anpassen“ – dann stimmt der Stand heute und der Verlauf davor. Fehlt nur zwischendurch etwas, wähle „Korrekturbuchung“.</p></div>';
       el.innerHTML = html;
     }
     el.onclick = function (e) {
@@ -1216,27 +1217,41 @@
   App.reconcile = function (accountId) {
     var a = acc(accountId);
     if (!a) return;
-    var cur = C.accountBalance(App.state, a.id, today());
-    var depotPart = a.type === 'depot' ? C.depotValue(App.state, a.id, today()) : 0;
-    App.modal({
+    var cur = C.cashBalance(App.state, a.id, today());
+    var isDepot = a.type === 'depot';
+    var form = App.modal({
       title: 'Saldo abgleichen – ' + a.name,
-      body: '<div class="form-grid"><label>Stand laut App</label><div class="bold">' + esc(C.formatMoney(cur - depotPart)) + (depotPart ? ' <span class="muted">(Bargeld, ohne Wertpapiere)</span>' : '') + '</div>' +
+      body: '<div class="form-grid"><label>Stand laut App</label><div class="bold" id="rec-app">' + esc(C.formatMoney(cur)) + (isDepot ? ' <span class="muted">(Bargeld, ohne Wertpapiere)</span>' : '') + '</div>' +
         '<label>Datum</label><input type="date" name="date" value="' + today() + '">' +
         '<label>Echter Stand</label><input type="text" name="real" class="amount" placeholder="laut Kontoauszug / Banking-App" autofocus>' +
-        '<span></span><div class="help">Die Differenz wird als Buchung „Saldo-Korrektur“ ohne Kategorie angelegt (zählt in Auswertungen unter „Ohne Kategorie“).</div></div>',
+        '<label>Differenz</label><div class="bold" id="rec-diff">–</div>' +
+        '<label>Ausgleichen durch</label><div>' +
+        '<label class="chk"><input type="radio" name="mode" value="opening"> <span><b>Anfangsbestand anpassen</b><br><span class="help">Richtig, wenn du alte Buchungen nachgetragen hast. Der ganze Verlauf verschiebt sich, es entsteht keine zusätzliche Buchung.</span></span></label>' +
+        '<label class="chk mt"><input type="radio" name="mode" value="booking" checked> <span><b>Korrekturbuchung am Datum</b><br><span class="help">Richtig, wenn zwischendurch etwas nicht erfasst wurde. Zählt nicht in Auswertungen.</span></span></label>' +
+        '</div></div>',
       submitLabel: 'Abgleichen',
       onSubmit: function (form) {
         var real = C.parseMoney(form.elements.real.value);
         if (isNaN(real)) { form.elements.real.classList.add('invalid'); return false; }
         var date = form.elements.date.value || today();
-        var at = C.accountBalance(App.state, a.id, date) - (a.type === 'depot' ? C.depotValue(App.state, a.id, date) : 0);
-        var diff = real - at;
-        if (!diff) { App.toast('Passt bereits – keine Korrektur nötig.'); return; }
-        App.commit('Saldo abgeglichen', function (st) {
-          st.transactions.push({ id: C.uid(), date: date, accountId: a.id, counterAccountId: null, amount: diff, payee: 'Saldo-Korrektur', categoryId: null, note: 'Abgleich auf ' + C.formatMoney(real), tags: [] });
-        }, { toast: 'Korrektur ' + C.formatMoney(diff, { sign: true }) + ' gebucht.' });
+        var mode = form.elements.mode.value;
+        var diff = 0;
+        App.commit('Saldo abgeglichen', function (st) { diff = C.reconcileAccount(st, a.id, date, real, mode); });
+        if (!diff) App.toast('Passt bereits – keine Korrektur nötig.');
+        else App.toast(mode === 'opening' ? 'Anfangsbestand um ' + C.formatMoney(diff, { sign: true }) + ' angepasst.' : 'Korrektur ' + C.formatMoney(diff, { sign: true }) + ' gebucht.', { undo: true });
       }
     });
+    // Differenz live anzeigen
+    function upd() {
+      var date = form.elements.date.value || today();
+      var atDate = C.cashBalance(App.state, a.id, date);
+      $('#rec-app', form).innerHTML = esc(C.formatMoney(atDate)) + (date !== today() ? ' <span class="muted">(am ' + C.formatDate(date) + ')</span>' : '');
+      var real = C.parseMoney(form.elements.real.value);
+      $('#rec-diff', form).textContent = isNaN(real) ? '–' : C.formatMoney(real - atDate, { sign: true });
+    }
+    form.addEventListener('input', upd);
+    form.addEventListener('change', upd);
+    $$('label.chk', form).forEach(function (l) { l.style.alignItems = 'flex-start'; });
   };
 
   // ================================================================ Tastatur & Start

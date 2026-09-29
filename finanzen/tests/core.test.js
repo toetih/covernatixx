@@ -353,3 +353,26 @@ test('Depot-CSV: Bestand und Umsätze erkennen', () => {
   assert.equal(C.findSecurity(s, '', 'msci world').id, 'w');
   assert.equal(C.findSecurity(s, 'XX', 'Anderes'), null);
 });
+
+test('Gehalt am Monatsende zählt zum Folgemonat', () => {
+  const s = baseState();
+  s.categories.push({ id: 'geh', name: 'Gehalt', type: 'income', parentId: null });
+  s.recurring.push({ id: 'g', name: 'Gehalt', active: true, mode: 'auto', unit: 'month', interval: 1, accountId: 'giro', amount: 400000, categoryId: 'geh', nextDate: '2025-08-31', anchorDay: 31, nextMonth: true });
+  C.processRecurring(s, '2025-09-30');
+  assert.equal(s.transactions.length, 2);
+  assert.ok(s.transactions.every(t => t.nextMonth));
+  assert.equal(C.reportMonth(s.transactions[0]), '2025-09');
+  // Kontostand am echten Datum
+  assert.equal(C.accountBalance(s, 'giro', '2025-08-31'), 500000);
+  // Auswertung: Aug-Gehalt zählt im September, Sep-Gehalt (30.09.) im Oktober
+  const r = C.categoryReport(s, { from: '2025-08-01', to: '2025-10-31', planned: true, today: '2025-09-30' });
+  assert.equal(r.income['2025-08'], 0);
+  assert.equal(r.income['2025-09'], 400000);
+  assert.equal(r.income['2025-10'], 400000);
+  assert.equal(r.planned.income['2025-10'], 0);           // 31.10. geplant -> November
+  const r2 = C.categoryReport(s, { from: '2025-11-01', to: '2025-11-30', planned: true, today: '2025-09-30' });
+  assert.equal(r2.planned.income['2025-11'], 400000);
+  // Jahreswechsel
+  assert.equal(C.reportMonth({ date: '2025-12-31', nextMonth: true }), '2026-01');
+  assert.equal(C.categorySpent(s, 'geh', '2025-09-01', '2025-09-30'), 400000);
+});

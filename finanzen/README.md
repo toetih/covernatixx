@@ -27,6 +27,7 @@ Tipp: In Chrome/Edge über Menü › „Streamen, speichern und teilen“ › �
 - **Abgleichen** (Konten): echten Kontostand eingeben, die Differenz wird als Korrektur gebucht.
 - **Kurse aktualisieren** (Depots): alle Kurse in einer Maske nachtragen.
 - **Sondertilgung** (Kredite): als Umbuchung aufs Darlehenskonto. Der Rechner „Was wäre wenn …“ zeigt vorher, wie viel Zeit und Zinsen sie spart.
+- **Gehalt am Monatsende:** Häkchen „Zählt in der Auswertung zum Folgemonat“ im Dauerauftrag bzw. in der Buchung. Für schon gebuchte Gehälter: in Buchungen markieren › „→ Folgemonat an/aus“. Kontostände bleiben am echten Datum.
 - `Strg+Z` macht die letzte Änderung rückgängig.
 
 ## Technik

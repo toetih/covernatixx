@@ -627,6 +627,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       tags: (rule.tags || []).slice(),
       recurringId: rule.id
     };
+    if (rule.nextMonth && !rule.counterAccountId) t.nextMonth = true;
     state.transactions.push(t);
     return { transaction: t };
   }
@@ -1146,7 +1147,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       var dates = occurrences(rule, toIso, 1000).filter(function (d) { return rule.mode !== 'auto' || d > today; });
       if (kind === 'income' || kind === 'expense') {
         dates.forEach(function (d) {
-          out.push({ date: d, amount: rule.amount, categoryId: rule.categoryId || null, accountId: rule.accountId, ruleId: rule.id });
+          out.push({ date: d, amount: rule.amount, categoryId: rule.categoryId || null, accountId: rule.accountId, ruleId: rule.id, nextMonth: !!rule.nextMonth });
         });
       } else if (kind === 'loan') {
         var la = findById(state.accounts, rule.loanAccountId);
@@ -1181,8 +1182,8 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       return b;
     }
     var all = bucket(), plan = bucket();
-    function book(b, date, amount, categoryId) {
-      var m = monthKey(date);
+    var fromM = monthKey(opts.from), toM = monthKey(opts.to);
+    function book(b, m, amount, categoryId) {
       var cid = categoryId && findById(state.categories, categoryId) ? categoryId : '__none';
       var mid = cid === '__none' ? '__none' : mainCategoryId(state, cid);
       add(b.byCat, cid, m, amount);
@@ -1191,17 +1192,19 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       if (cid === '__none') add(b.none, amount >= 0 ? 'income' : 'expense', m, amount);
     }
     state.transactions.forEach(function (t) {
-      if (t.date < opts.from || t.date > opts.to) return;
       if (!isIncomeExpense(t)) return;
+      var m = reportMonth(t);
+      if (m < fromM || m > toM) return;
       if (accSet && !accSet[t.accountId]) return;
-      book(all, t.date, t.amount, t.categoryId);
+      book(all, m, t.amount, t.categoryId);
     });
     if (opts.planned) {
       plannedEntries(state, opts.today || todayISO(), opts.to).forEach(function (e) {
-        if (e.date < opts.from || e.date > opts.to) return;
+        var m = reportMonth(e);
+        if (m < fromM || m > toM) return;
         if (accSet && !accSet[e.accountId]) return;
-        book(all, e.date, e.amount, e.categoryId);
-        book(plan, e.date, e.amount, e.categoryId);
+        book(all, m, e.amount, e.categoryId);
+        book(plan, m, e.amount, e.categoryId);
       });
     }
     return {
@@ -1221,13 +1224,25 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     return s;
   }
 
-  /** Summe einer Kategorie (inkl. Unterkategorien) im Zeitraum. */
+  /**
+   * Abrechnungsmonat einer Buchung ('YYYY-MM'). Normalerweise der Monat des Datums;
+   * mit nextMonth (z. B. Gehalt am Monatsende) der Folgemonat. Kontostände nutzen immer das echte Datum.
+   */
+  function reportMonth(t) {
+    var m = monthKey(t.date);
+    return t.nextMonth ? monthKey(addMonths(m + '-01', 1, 1)) : m;
+  }
+
+  /** Summe einer Kategorie (inkl. Unterkategorien) im Zeitraum (nach Abrechnungsmonat). */
   function categorySpent(state, catId, from, to, accountIds) {
     var ids = toSet(descendantIds(state, catId));
     var accSet = accountIds ? toSet(accountIds) : null;
     var sum = 0;
+    var fromM = monthKey(from), toM = monthKey(to);
     state.transactions.forEach(function (t) {
-      if (t.date < from || t.date > to || !isIncomeExpense(t)) return;
+      if (!isIncomeExpense(t)) return;
+      var m = reportMonth(t);
+      if (m < fromM || m > toM) return;
       if (accSet && !accSet[t.accountId]) return;
       if (ids[t.categoryId]) sum += t.amount;
     });
@@ -1702,7 +1717,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     syncTradeTransaction: syncTradeTransaction, roundQty: roundQty,
     // Kategorien & Auswertung
     categoryPath: categoryPath, mainCategoryId: mainCategoryId, categoryTree: categoryTree, descendantIds: descendantIds,
-    categoryReport: categoryReport, plannedEntries: plannedEntries, categorySpent: categorySpent, PALETTE: PALETTE,
+    categoryReport: categoryReport, plannedEntries: plannedEntries, reportMonth: reportMonth, categorySpent: categorySpent, PALETTE: PALETTE,
     applyRules: applyRules, suggestCategory: suggestCategory,
     // CSV
     parseCSV: parseCSV, detectDelimiter: detectDelimiter, detectHeaderRow: detectHeaderRow, guessMapping: guessMapping,
@@ -2152,7 +2167,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
 
   // ---------------------------------------------------------------- Rendering
   App.go = function (view, params) {
-    if (params && params.tx) Object.assign(App.ui.tx, params.tx);
+    if (params && params.tx) Object.assign(App.ui.tx, { byReportMonth: false }, params.tx);
     if (location.hash !== '#' + view) location.hash = view;
     else App.render();
   };
@@ -2594,8 +2609,13 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     var qAmount = q ? C.parseMoney(q) : NaN;
     var tag = f.tag.trim().toLowerCase();
     var out = [];
+    var byRM = f.byReportMonth && f.period === 'custom';
+    var rmFrom = byRM ? C.monthKey(range[0]) : null, rmTo = byRM ? C.monthKey(range[1]) : null;
     s.transactions.forEach(function (t, idx) {
-      if (t.date < range[0] || t.date > range[1]) return;
+      if (byRM && C.isIncomeExpense(t)) {
+        var rm = C.reportMonth(t);
+        if (rm < rmFrom || rm > rmTo) return;
+      } else if (t.date < range[0] || t.date > range[1]) return;
       if (accSet && !accSet[t.accountId] && !accSet[t.counterAccountId]) return;
       if (accSet && t.counterAccountId && accSet[t.accountId] && accSet[t.counterAccountId] && f.account.indexOf('group:') === 0) { /* interne Umbuchung in der Gruppe: anzeigen */ }
       if (f.cat === '__none' && (t.categoryId || !C.isIncomeExpense(t))) return;
@@ -2699,7 +2719,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     var selIds = Object.keys(App.ui.txSel).filter(function (id) { return App.ui.txSel[id]; });
     if (selIds.length) {
       html += '<div class="bulk"><b>' + selIds.length + ' ausgewählt</b><select id="bulk-cat">' + App.categoryOptions('', { empty: 'Kategorie setzen …' }) + '</select>' +
-        '<button class="btn small" data-act="bulk-cat">Übernehmen</button><button class="btn small danger" data-act="bulk-del">Löschen</button><button class="btn small ghost" data-act="bulk-clear">Auswahl aufheben</button></div>';
+        '<button class="btn small" data-act="bulk-cat">Übernehmen</button><button class="btn small" data-act="bulk-next" title="Für Auswertungen zum Folgemonat zählen (an/aus)">→ Folgemonat an/aus</button><button class="btn small danger" data-act="bulk-del">Löschen</button><button class="btn small ghost" data-act="bulk-clear">Auswahl aufheben</button></div>';
     }
 
     if (!rows.length) {
@@ -2722,7 +2742,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
         }
         if (t.note) desc += '<div class="small ellipsis">' + esc(t.note) + '</div>';
         var tags = (t.tags || []).map(function (x) { return '<span class="tag">#' + esc(x) + '</span>'; }).join('');
-        var icons = (t.recurringId ? '<span class="icon-rec" title="aus wiederkehrender Buchung">↻</span>' : '') + (t.tradeId ? '<span class="icon-rec" title="Wertpapier-Buchung">◆</span>' : '');
+        var icons = (t.nextMonth ? '<span class="tag" title="zählt in der Auswertung zum Folgemonat">→ ' + esc(C.formatMonth(C.reportMonth(t))) + '</span>' : '') + (t.recurringId ? '<span class="icon-rec" title="aus wiederkehrender Buchung">↻</span>' : '') + (t.tradeId ? '<span class="icon-rec" title="Wertpapier-Buchung">◆</span>' : '');
         html += '<tr class="click' + (App.ui.txSel[t.id] ? ' sel' : '') + (t.date > t0 ? ' planned' : '') + '" data-id="' + t.id + '"><td class="cb"><input type="checkbox" data-sel="' + t.id + '"' + (App.ui.txSel[t.id] ? ' checked' : '') + '></td>' +
           '<td class="nowrap">' + C.formatDate(t.date) + '</td>' +
           (singleAcc ? '' : '<td class="nowrap">' + esc(isT ? accName(t.accountId) : accName(t.accountId)) + '</td>') +
@@ -2815,6 +2835,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
         clearTimeout(timer);
         timer = setTimeout(function () {
           f[inp.dataset.f] = inp.value;
+          f.byReportMonth = false;
           f.limit = 300;
           App.ui.txSel = {};
           var focusKey = inp.dataset.f, pos = inp.selectionStart;
@@ -2850,6 +2871,15 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
           App.commit('Kategorie gesetzt', function (s) {
             s.transactions.forEach(function (t) { if (ids[t.id] && !t.counterAccountId && !(t.tradeId && t.tradeType !== 'dividend')) t.categoryId = cid; });
           }, { toast: 'Kategorie gesetzt.' });
+          App.ui.txSel = {};
+          App.render();
+        } else if (act === 'bulk-next') {
+          var sel = App.ui.txSel;
+          var chosen = App.state.transactions.filter(function (t) { return sel[t.id] && C.isIncomeExpense(t); });
+          var turnOn = chosen.some(function (t) { return !t.nextMonth; });
+          App.commit('Folgemonat geändert', function (s) {
+            s.transactions.forEach(function (t) { if (sel[t.id] && C.isIncomeExpense(t)) { if (turnOn) t.nextMonth = true; else delete t.nextMonth; } });
+          }, { toast: chosen.length + ' Buchungen zählen ' + (turnOn ? 'jetzt zum Folgemonat.' : 'wieder zum eigenen Monat.') });
           App.ui.txSel = {};
           App.render();
         } else if (act === 'bulk-del') {
@@ -2926,6 +2956,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
         (tr ? '' : '<label>Kategorie</label><select name="categoryId">' + App.categoryOptions(d.categoryId, { type: type }) + '</select>') +
         '<label>Notiz</label><input type="text" name="note" value="' + esc(d.note) + '">' +
         '<label>Tags</label><input type="text" name="tags" value="' + esc((d.tags || []).join(', ')) + '" placeholder="z. B. Urlaub, Steuer">' +
+        (tr ? '' : '<span></span><label class="chk" title="Kontostand bleibt am echten Datum – nur die Auswertung verschiebt"><input type="checkbox" name="nextMonth"' + (d.nextMonth ? ' checked' : '') + '> Zählt in der Auswertung zum Folgemonat (z. B. Gehalt am Monatsende)</label>') +
         (d.recurringId ? '<span></span><div class="help">↻ Entstanden aus „' + esc((C.findById(s.recurring, d.recurringId) || { name: 'gelöschte Regel' }).name) + '“.</div>' : '') +
         '</div>' + App.payeeDatalist('dl-payees-m');
     }
@@ -2937,6 +2968,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       d.categoryId = form.elements.categoryId ? (form.elements.categoryId.value || null) : null;
       d.note = form.elements.note.value.trim();
       d.tags = parseTags(form.elements.tags.value);
+      d.nextMonth = form.elements.nextMonth ? form.elements.nextMonth.checked : false;
       var amt = C.parseMoney(form.elements.amount.value);
       d._amt = isNaN(amt) ? NaN : Math.abs(amt);
     }
@@ -2959,6 +2991,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
           if (d.recurringId) rec.recurringId = d.recurringId;
           if (d.excludeFromReports && !rec.categoryId && type !== 'transfer') rec.excludeFromReports = true;
           if (d.loanPart) rec.loanPart = d.loanPart;
+          if (d.nextMonth && type !== 'transfer') rec.nextMonth = true;
           App.commit(isNew ? 'Buchung angelegt' : 'Buchung geändert', function (st) {
             var i = st.transactions.findIndex(function (x) { return x.id === rec.id; });
             if (i >= 0) st.transactions[i] = rec; else st.transactions.push(rec);
@@ -3649,6 +3682,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
         '<label>Modus</label><select name="mode"><option value="auto"' + sel('auto', d.mode) + '>Automatisch buchen</option><option value="confirm"' + sel('confirm', d.mode) + '>Zur Bestätigung vorlegen (Betrag variiert)</option></select>' +
         '<label>Notiz</label><input type="text" name="note" value="' + esc(d.note || '') + '">' +
         (tr || sp ? '' : '<label>Tags</label><input type="text" name="tags" value="' + esc((d.tags || []).join(', ')) + '">') +
+        (tr || sp ? '' : '<span></span><label class="chk"><input type="checkbox" name="nextMonth"' + (d.nextMonth ? ' checked' : '') + '> Zählt in der Auswertung zum Folgemonat (z. B. Gehalt am Monatsende)</label>') +
         (isNew ? '' : '<span></span><label class="chk"><input type="checkbox" name="active"' + (d.active ? ' checked' : '') + '> Aktiv</label>') +
         '</div>' + (tr || sp ? '' : App.payeeDatalist('dl-payees-r'));
     }
@@ -3672,6 +3706,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       d.mode = f.mode.value;
       d.note = f.note.value.trim();
       d.tags = f.tags ? App.parseTags(f.tags.value) : [];
+      d.nextMonth = f.nextMonth ? f.nextMonth.checked : false;
       if (f.active) d.active = f.active.checked;
     }
     function open() {
@@ -3699,6 +3734,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
               payee: kind === 'transfer' ? (d.name || 'Umbuchung') : (kind === 'savingsplan' ? 'Sparplan' : d.payee),
               categoryId: kind === 'expense' || kind === 'income' ? d.categoryId : null,
               note: d.note, tags: d.tags, unit: d.unit, interval: d.interval,
+              nextMonth: (kind === 'income' || kind === 'expense') && d.nextMonth ? true : undefined,
               startDate: d.startDate || d.nextDate, nextDate: d.nextDate, endDate: d.endDate,
               anchorDay: (!origNext || origNext !== d.nextDate || !d.anchorDay) ? C.parts(d.nextDate).d : d.anchorDay,
               mode: d.mode, active: isNew ? true : d.active
@@ -3916,7 +3952,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       if (a.dataset.act === 'csv') return App.download('auswertung-' + range[0].slice(0, 4) + '.csv', '﻿' + C.toCSV(csvRows, ';'), 'text/csv;charset=utf-8');
       var from = range[0], to = range[1];
       if (a.dataset.m) { from = a.dataset.m + '-01'; to = C.endOfMonth(from); }
-      var base = { account: f.account, period: 'custom', from: from, to: to, cat: '', type: '', q: '', tag: '' };
+      var base = { account: f.account, period: 'custom', from: from, to: to, cat: '', type: '', q: '', tag: '', byReportMonth: true };
       if (a.dataset.cat) base.cat = a.dataset.cat;
       if (a.dataset.tag) base.tag = a.dataset.tag;
       if (a.dataset.payee) base.q = a.dataset.payee;

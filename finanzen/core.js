@@ -279,6 +279,7 @@
       tags: (rule.tags || []).slice(),
       recurringId: rule.id
     };
+    if (rule.nextMonth && !rule.counterAccountId) t.nextMonth = true;
     state.transactions.push(t);
     return { transaction: t };
   }
@@ -798,7 +799,7 @@
       var dates = occurrences(rule, toIso, 1000).filter(function (d) { return rule.mode !== 'auto' || d > today; });
       if (kind === 'income' || kind === 'expense') {
         dates.forEach(function (d) {
-          out.push({ date: d, amount: rule.amount, categoryId: rule.categoryId || null, accountId: rule.accountId, ruleId: rule.id });
+          out.push({ date: d, amount: rule.amount, categoryId: rule.categoryId || null, accountId: rule.accountId, ruleId: rule.id, nextMonth: !!rule.nextMonth });
         });
       } else if (kind === 'loan') {
         var la = findById(state.accounts, rule.loanAccountId);
@@ -833,8 +834,8 @@
       return b;
     }
     var all = bucket(), plan = bucket();
-    function book(b, date, amount, categoryId) {
-      var m = monthKey(date);
+    var fromM = monthKey(opts.from), toM = monthKey(opts.to);
+    function book(b, m, amount, categoryId) {
       var cid = categoryId && findById(state.categories, categoryId) ? categoryId : '__none';
       var mid = cid === '__none' ? '__none' : mainCategoryId(state, cid);
       add(b.byCat, cid, m, amount);
@@ -843,17 +844,19 @@
       if (cid === '__none') add(b.none, amount >= 0 ? 'income' : 'expense', m, amount);
     }
     state.transactions.forEach(function (t) {
-      if (t.date < opts.from || t.date > opts.to) return;
       if (!isIncomeExpense(t)) return;
+      var m = reportMonth(t);
+      if (m < fromM || m > toM) return;
       if (accSet && !accSet[t.accountId]) return;
-      book(all, t.date, t.amount, t.categoryId);
+      book(all, m, t.amount, t.categoryId);
     });
     if (opts.planned) {
       plannedEntries(state, opts.today || todayISO(), opts.to).forEach(function (e) {
-        if (e.date < opts.from || e.date > opts.to) return;
+        var m = reportMonth(e);
+        if (m < fromM || m > toM) return;
         if (accSet && !accSet[e.accountId]) return;
-        book(all, e.date, e.amount, e.categoryId);
-        book(plan, e.date, e.amount, e.categoryId);
+        book(all, m, e.amount, e.categoryId);
+        book(plan, m, e.amount, e.categoryId);
       });
     }
     return {
@@ -873,13 +876,25 @@
     return s;
   }
 
-  /** Summe einer Kategorie (inkl. Unterkategorien) im Zeitraum. */
+  /**
+   * Abrechnungsmonat einer Buchung ('YYYY-MM'). Normalerweise der Monat des Datums;
+   * mit nextMonth (z. B. Gehalt am Monatsende) der Folgemonat. Kontostände nutzen immer das echte Datum.
+   */
+  function reportMonth(t) {
+    var m = monthKey(t.date);
+    return t.nextMonth ? monthKey(addMonths(m + '-01', 1, 1)) : m;
+  }
+
+  /** Summe einer Kategorie (inkl. Unterkategorien) im Zeitraum (nach Abrechnungsmonat). */
   function categorySpent(state, catId, from, to, accountIds) {
     var ids = toSet(descendantIds(state, catId));
     var accSet = accountIds ? toSet(accountIds) : null;
     var sum = 0;
+    var fromM = monthKey(from), toM = monthKey(to);
     state.transactions.forEach(function (t) {
-      if (t.date < from || t.date > to || !isIncomeExpense(t)) return;
+      if (!isIncomeExpense(t)) return;
+      var m = reportMonth(t);
+      if (m < fromM || m > toM) return;
       if (accSet && !accSet[t.accountId]) return;
       if (ids[t.categoryId]) sum += t.amount;
     });
@@ -1354,7 +1369,7 @@
     syncTradeTransaction: syncTradeTransaction, roundQty: roundQty,
     // Kategorien & Auswertung
     categoryPath: categoryPath, mainCategoryId: mainCategoryId, categoryTree: categoryTree, descendantIds: descendantIds,
-    categoryReport: categoryReport, plannedEntries: plannedEntries, categorySpent: categorySpent, PALETTE: PALETTE,
+    categoryReport: categoryReport, plannedEntries: plannedEntries, reportMonth: reportMonth, categorySpent: categorySpent, PALETTE: PALETTE,
     applyRules: applyRules, suggestCategory: suggestCategory,
     // CSV
     parseCSV: parseCSV, detectDelimiter: detectDelimiter, detectHeaderRow: detectHeaderRow, guessMapping: guessMapping,

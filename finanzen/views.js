@@ -409,6 +409,7 @@
         '<label>Modus</label><select name="mode"><option value="auto"' + sel('auto', d.mode) + '>Automatisch buchen</option><option value="confirm"' + sel('confirm', d.mode) + '>Zur Bestätigung vorlegen (Betrag variiert)</option></select>' +
         '<label>Notiz</label><input type="text" name="note" value="' + esc(d.note || '') + '">' +
         (tr || sp ? '' : '<label>Tags</label><input type="text" name="tags" value="' + esc((d.tags || []).join(', ')) + '">') +
+        (tr || sp ? '' : '<span></span><label class="chk"><input type="checkbox" name="nextMonth"' + (d.nextMonth ? ' checked' : '') + '> Zählt in der Auswertung zum Folgemonat (z. B. Gehalt am Monatsende)</label>') +
         (isNew ? '' : '<span></span><label class="chk"><input type="checkbox" name="active"' + (d.active ? ' checked' : '') + '> Aktiv</label>') +
         '</div>' + (tr || sp ? '' : App.payeeDatalist('dl-payees-r'));
     }
@@ -432,6 +433,7 @@
       d.mode = f.mode.value;
       d.note = f.note.value.trim();
       d.tags = f.tags ? App.parseTags(f.tags.value) : [];
+      d.nextMonth = f.nextMonth ? f.nextMonth.checked : false;
       if (f.active) d.active = f.active.checked;
     }
     function open() {
@@ -459,6 +461,7 @@
               payee: kind === 'transfer' ? (d.name || 'Umbuchung') : (kind === 'savingsplan' ? 'Sparplan' : d.payee),
               categoryId: kind === 'expense' || kind === 'income' ? d.categoryId : null,
               note: d.note, tags: d.tags, unit: d.unit, interval: d.interval,
+              nextMonth: (kind === 'income' || kind === 'expense') && d.nextMonth ? true : undefined,
               startDate: d.startDate || d.nextDate, nextDate: d.nextDate, endDate: d.endDate,
               anchorDay: (!origNext || origNext !== d.nextDate || !d.anchorDay) ? C.parts(d.nextDate).d : d.anchorDay,
               mode: d.mode, active: isNew ? true : d.active
@@ -676,7 +679,7 @@
       if (a.dataset.act === 'csv') return App.download('auswertung-' + range[0].slice(0, 4) + '.csv', '﻿' + C.toCSV(csvRows, ';'), 'text/csv;charset=utf-8');
       var from = range[0], to = range[1];
       if (a.dataset.m) { from = a.dataset.m + '-01'; to = C.endOfMonth(from); }
-      var base = { account: f.account, period: 'custom', from: from, to: to, cat: '', type: '', q: '', tag: '' };
+      var base = { account: f.account, period: 'custom', from: from, to: to, cat: '', type: '', q: '', tag: '', byReportMonth: true };
       if (a.dataset.cat) base.cat = a.dataset.cat;
       if (a.dataset.tag) base.tag = a.dataset.tag;
       if (a.dataset.payee) base.q = a.dataset.payee;

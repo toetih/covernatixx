@@ -245,7 +245,7 @@
 
   // ---------------------------------------------------------------- Rendering
   App.go = function (view, params) {
-    if (params && params.tx) Object.assign(App.ui.tx, params.tx);
+    if (params && params.tx) Object.assign(App.ui.tx, { byReportMonth: false }, params.tx);
     if (location.hash !== '#' + view) location.hash = view;
     else App.render();
   };
@@ -687,8 +687,13 @@
     var qAmount = q ? C.parseMoney(q) : NaN;
     var tag = f.tag.trim().toLowerCase();
     var out = [];
+    var byRM = f.byReportMonth && f.period === 'custom';
+    var rmFrom = byRM ? C.monthKey(range[0]) : null, rmTo = byRM ? C.monthKey(range[1]) : null;
     s.transactions.forEach(function (t, idx) {
-      if (t.date < range[0] || t.date > range[1]) return;
+      if (byRM && C.isIncomeExpense(t)) {
+        var rm = C.reportMonth(t);
+        if (rm < rmFrom || rm > rmTo) return;
+      } else if (t.date < range[0] || t.date > range[1]) return;
       if (accSet && !accSet[t.accountId] && !accSet[t.counterAccountId]) return;
       if (accSet && t.counterAccountId && accSet[t.accountId] && accSet[t.counterAccountId] && f.account.indexOf('group:') === 0) { /* interne Umbuchung in der Gruppe: anzeigen */ }
       if (f.cat === '__none' && (t.categoryId || !C.isIncomeExpense(t))) return;
@@ -792,7 +797,7 @@
     var selIds = Object.keys(App.ui.txSel).filter(function (id) { return App.ui.txSel[id]; });
     if (selIds.length) {
       html += '<div class="bulk"><b>' + selIds.length + ' ausgewählt</b><select id="bulk-cat">' + App.categoryOptions('', { empty: 'Kategorie setzen …' }) + '</select>' +
-        '<button class="btn small" data-act="bulk-cat">Übernehmen</button><button class="btn small danger" data-act="bulk-del">Löschen</button><button class="btn small ghost" data-act="bulk-clear">Auswahl aufheben</button></div>';
+        '<button class="btn small" data-act="bulk-cat">Übernehmen</button><button class="btn small" data-act="bulk-next" title="Für Auswertungen zum Folgemonat zählen (an/aus)">→ Folgemonat an/aus</button><button class="btn small danger" data-act="bulk-del">Löschen</button><button class="btn small ghost" data-act="bulk-clear">Auswahl aufheben</button></div>';
     }
 
     if (!rows.length) {
@@ -815,7 +820,7 @@
         }
         if (t.note) desc += '<div class="small ellipsis">' + esc(t.note) + '</div>';
         var tags = (t.tags || []).map(function (x) { return '<span class="tag">#' + esc(x) + '</span>'; }).join('');
-        var icons = (t.recurringId ? '<span class="icon-rec" title="aus wiederkehrender Buchung">↻</span>' : '') + (t.tradeId ? '<span class="icon-rec" title="Wertpapier-Buchung">◆</span>' : '');
+        var icons = (t.nextMonth ? '<span class="tag" title="zählt in der Auswertung zum Folgemonat">→ ' + esc(C.formatMonth(C.reportMonth(t))) + '</span>' : '') + (t.recurringId ? '<span class="icon-rec" title="aus wiederkehrender Buchung">↻</span>' : '') + (t.tradeId ? '<span class="icon-rec" title="Wertpapier-Buchung">◆</span>' : '');
         html += '<tr class="click' + (App.ui.txSel[t.id] ? ' sel' : '') + (t.date > t0 ? ' planned' : '') + '" data-id="' + t.id + '"><td class="cb"><input type="checkbox" data-sel="' + t.id + '"' + (App.ui.txSel[t.id] ? ' checked' : '') + '></td>' +
           '<td class="nowrap">' + C.formatDate(t.date) + '</td>' +
           (singleAcc ? '' : '<td class="nowrap">' + esc(isT ? accName(t.accountId) : accName(t.accountId)) + '</td>') +
@@ -908,6 +913,7 @@
         clearTimeout(timer);
         timer = setTimeout(function () {
           f[inp.dataset.f] = inp.value;
+          f.byReportMonth = false;
           f.limit = 300;
           App.ui.txSel = {};
           var focusKey = inp.dataset.f, pos = inp.selectionStart;
@@ -943,6 +949,15 @@
           App.commit('Kategorie gesetzt', function (s) {
             s.transactions.forEach(function (t) { if (ids[t.id] && !t.counterAccountId && !(t.tradeId && t.tradeType !== 'dividend')) t.categoryId = cid; });
           }, { toast: 'Kategorie gesetzt.' });
+          App.ui.txSel = {};
+          App.render();
+        } else if (act === 'bulk-next') {
+          var sel = App.ui.txSel;
+          var chosen = App.state.transactions.filter(function (t) { return sel[t.id] && C.isIncomeExpense(t); });
+          var turnOn = chosen.some(function (t) { return !t.nextMonth; });
+          App.commit('Folgemonat geändert', function (s) {
+            s.transactions.forEach(function (t) { if (sel[t.id] && C.isIncomeExpense(t)) { if (turnOn) t.nextMonth = true; else delete t.nextMonth; } });
+          }, { toast: chosen.length + ' Buchungen zählen ' + (turnOn ? 'jetzt zum Folgemonat.' : 'wieder zum eigenen Monat.') });
           App.ui.txSel = {};
           App.render();
         } else if (act === 'bulk-del') {
@@ -1019,6 +1034,7 @@
         (tr ? '' : '<label>Kategorie</label><select name="categoryId">' + App.categoryOptions(d.categoryId, { type: type }) + '</select>') +
         '<label>Notiz</label><input type="text" name="note" value="' + esc(d.note) + '">' +
         '<label>Tags</label><input type="text" name="tags" value="' + esc((d.tags || []).join(', ')) + '" placeholder="z. B. Urlaub, Steuer">' +
+        (tr ? '' : '<span></span><label class="chk" title="Kontostand bleibt am echten Datum – nur die Auswertung verschiebt"><input type="checkbox" name="nextMonth"' + (d.nextMonth ? ' checked' : '') + '> Zählt in der Auswertung zum Folgemonat (z. B. Gehalt am Monatsende)</label>') +
         (d.recurringId ? '<span></span><div class="help">↻ Entstanden aus „' + esc((C.findById(s.recurring, d.recurringId) || { name: 'gelöschte Regel' }).name) + '“.</div>' : '') +
         '</div>' + App.payeeDatalist('dl-payees-m');
     }
@@ -1030,6 +1046,7 @@
       d.categoryId = form.elements.categoryId ? (form.elements.categoryId.value || null) : null;
       d.note = form.elements.note.value.trim();
       d.tags = parseTags(form.elements.tags.value);
+      d.nextMonth = form.elements.nextMonth ? form.elements.nextMonth.checked : false;
       var amt = C.parseMoney(form.elements.amount.value);
       d._amt = isNaN(amt) ? NaN : Math.abs(amt);
     }
@@ -1052,6 +1069,7 @@
           if (d.recurringId) rec.recurringId = d.recurringId;
           if (d.excludeFromReports && !rec.categoryId && type !== 'transfer') rec.excludeFromReports = true;
           if (d.loanPart) rec.loanPart = d.loanPart;
+          if (d.nextMonth && type !== 'transfer') rec.nextMonth = true;
           App.commit(isNew ? 'Buchung angelegt' : 'Buchung geändert', function (st) {
             var i = st.transactions.findIndex(function (x) { return x.id === rec.id; });
             if (i >= 0) st.transactions[i] = rec; else st.transactions.push(rec);

@@ -690,8 +690,9 @@
   // ================================================================ KATEGORIEN & REGELN
   App.views.kategorien = function (el) {
     var s = App.state;
-    var counts = {};
-    s.transactions.forEach(function (x) { if (x.categoryId) counts[x.categoryId] = (counts[x.categoryId] || 0) + 1; });
+    var U = C.categoryUsage(s);
+    var cf = App.ui.catFilter || 'all';
+    var unusedCount = s.categories.filter(function (c) { return !U[c.id].used; }).length;
     // Durchschnitt der letzten 3 abgeschlossenen Monate als Orientierung fürs Budget
     var t = today();
     var avgFrom = C.addMonths(C.startOfMonth(t), -3, 1), avgTo = C.addDays(C.startOfMonth(t), -1);
@@ -702,33 +703,58 @@
       return Math.round(sum / 3);
     }
     function dash(v) { return v ? v : '<span class="muted">–</span>'; }
+    function usageBadges(x) {
+      var b = '';
+      if (x.recurring) b += ' <span class="badge" title="in ' + x.recurring + ' wiederkehrenden Buchung(en)">↻ ' + x.recurring + '</span>';
+      if (x.rules) b += ' <span class="badge" title="in ' + x.rules + ' Regel(n) zur Auto-Kategorisierung">Regel</span>';
+      if (x.loans) b += ' <span class="badge" title="Zinsen eines Kredits">Kredit</span>';
+      return b;
+    }
+    function lastCell(d) {
+      if (!d) return '<span class="muted">–</span>';
+      var days = C.diffDays(d, t);
+      var old = days > 180;
+      return '<span class="' + (old ? 'muted' : '') + '" title="' + (days >= 0 ? 'vor ' + days + ' Tagen' : 'geplant') + '">' + C.formatDate(d) + '</span>';
+    }
+    function visible(x) { return cf === 'all' || (cf === 'used' ? x.used : !x.used); }
     var html = '<div class="page-head"><div><h1>Kategorien &amp; Regeln</h1><div class="sub">Zwei Ebenen: Hauptkategorie › Unterkategorie. Klick auf eine Kategorie zum Umbenennen, Verschieben, Färben.</div></div>' +
-      '<div class="actions"><button class="btn" data-act="new" data-type="income">+ Einnahme-Kategorie</button><button class="btn primary" data-act="new" data-type="expense">+ Ausgabe-Kategorie</button></div></div>';
+      '<div class="actions"><span class="seg" id="cat-filter">' +
+      '<button type="button" data-cf="all" class="' + (cf === 'all' ? 'on' : '') + '">Alle</button>' +
+      '<button type="button" data-cf="used" class="' + (cf === 'used' ? 'on' : '') + '">Genutzte</button>' +
+      '<button type="button" data-cf="unused" class="' + (cf === 'unused' ? 'on' : '') + '">Ungenutzte (' + unusedCount + ')</button></span>' +
+      (unusedCount ? '<button class="btn" data-act="cleanup">Ungenutzte aufräumen …</button>' : '') +
+      '<button class="btn" data-act="new" data-type="income">+ Einnahme-Kategorie</button><button class="btn primary" data-act="new" data-type="expense">+ Ausgabe-Kategorie</button></div></div>';
     html += '<div class="grid two">';
     [['expense', 'Ausgaben'], ['income', 'Einnahmen']].forEach(function (tp) {
       var isExp = tp[0] === 'expense';
-      html += '<div class="card"><div class="card-head"><h2>' + tp[1] + '</h2>' + (isExp ? '<span class="help">Budget einfach eintippen · leer = kein Budget</span>' : '') + '</div><div class="card-body flush"><table class="tbl"><thead><tr><th>Kategorie</th><th class="num">Buchungen</th>' +
-        '<th class="num" title="Durchschnitt ' + C.formatDate(avgFrom) + ' – ' + C.formatDate(avgTo) + '">Ø 3 Monate</th>' + (isExp ? '<th class="num">Budget / Monat</th>' : '') + '<th></th></tr></thead><tbody>';
+      var body = '';
       C.categoryTree(s, tp[0]).forEach(function (node) {
-        var c = node.cat;
-        var total = (counts[c.id] || 0);
-        node.children.forEach(function (k) { total += counts[k.id] || 0; });
+        var c = node.cat, x = U[c.id];
+        var kids = node.children.filter(function (k) { return visible(U[k.id]); });
+        // Hauptkategorie zeigen, wenn sie selbst passt oder sichtbare Unterkategorien hat
+        if (!visible(x) && !kids.length && !(cf === 'unused' && !x.usedSelf)) return;
         var sumKids = 0;
         node.children.forEach(function (k) { sumKids += k.budget || 0; });
-        html += '<tr class="click" data-cat="' + c.id + '"><td class="bold"><span class="cat-dot" style="background:' + esc(c.color) + '"></span>' + esc(c.name) + '</td><td class="num">' + dash(total) + '</td>' +
+        body += '<tr class="click' + (x.used ? '' : ' muted') + '" data-cat="' + c.id + '"><td class="bold"><span class="cat-dot" style="background:' + esc(c.color) + '"></span>' + esc(c.name) +
+          (x.used ? usageBadges(x) : ' <span class="badge">ungenutzt</span>') + '</td><td class="num">' + dash(x.txTotal) + '</td><td class="num nowrap">' + lastCell(x.lastTotal) + '</td>' +
           '<td class="num">' + dash(avg(avgRep.byMain, c.id) ? esc(C.formatMoney(Math.abs(avg(avgRep.byMain, c.id)))) : 0) + '</td>' +
           (isExp ? '<td class="num">' + budgetInput(c, sumKids ? 'Σ ' + C.formatAmountInput(sumKids) : '') + '</td>' : '') +
-          '<td class="num"><button class="btn small ghost" data-act="sub" data-id="' + c.id + '" title="Unterkategorie hinzufügen">+ Unter</button></td></tr>';
-        node.children.forEach(function (k) {
+          '<td class="num"><button class="btn small ghost" data-act="sub" data-id="' + c.id + '" title="Unterkategorie hinzufügen">＋</button></td></tr>';
+        kids.forEach(function (k) {
+          var y = U[k.id];
           var a = avg(avgRep.byCat, k.id);
-          html += '<tr class="click" data-cat="' + k.id + '"><td class="sub">' + esc(k.name) + '</td><td class="num">' + dash(counts[k.id] || 0) + '</td>' +
+          body += '<tr class="click' + (y.used ? '' : ' muted') + '" data-cat="' + k.id + '"><td class="sub">' + esc(k.name) + (y.used ? usageBadges(y) : ' <span class="badge">ungenutzt</span>') + '</td><td class="num">' + dash(y.tx) + '</td><td class="num nowrap">' + lastCell(y.last) + '</td>' +
             '<td class="num">' + dash(a ? esc(C.formatMoney(Math.abs(a))) : 0) + '</td>' +
             (isExp ? '<td class="num">' + budgetInput(k, '') + '</td>' : '') + '<td></td></tr>';
         });
       });
-      html += '</tbody></table></div></div>';
+      html += '<div class="card"><div class="card-head"><h2>' + tp[1] + '</h2>' + (isExp ? '<span class="help">Budget einfach eintippen · leer = kein Budget</span>' : '') + '</div><div class="card-body flush tbl-wrap">' +
+        (body ? '<table class="tbl"><thead><tr><th>Kategorie</th><th class="num">Buchungen</th><th class="num">Zuletzt</th>' +
+          '<th class="num" title="Durchschnitt ' + C.formatDate(avgFrom) + ' – ' + C.formatDate(avgTo) + '">Ø 3 Monate</th>' + (isExp ? '<th class="num">Budget / Monat</th>' : '') + '<th></th></tr></thead><tbody>' + body + '</tbody></table>'
+          : '<div class="empty">Keine Kategorien für diesen Filter.</div>') + '</div></div>';
     });
     html += '</div>';
+    html += '<div class="help mt">„Genutzt“ heißt: Buchungen, ein Dauerauftrag (↻), eine Regel, ein Kredit (Zinsen) oder ein Budget verweisen auf die Kategorie. Grau = ungenutzt, gefahrlos löschbar.</div>';
 
     // Regeln
     var uncategorized = s.transactions.filter(function (x) { return !x.categoryId && C.isIncomeExpense(x); }).length;
@@ -757,8 +783,9 @@
         App.toast(v ? 'Budget ' + C.formatMoney(v) + ' gespeichert.' : 'Budget entfernt.');
       });
     });
+    $$('[data-cf]', el).forEach(function (b) { b.onclick = function () { App.ui.catFilter = b.dataset.cf; App.render(); }; });
     el.onclick = function (e) {
-      if (e.target.closest('input')) return;
+      if (e.target.closest('input') || e.target.closest('[data-cf]')) return;
       var a = e.target.closest('[data-act]');
       if (a) {
         e.stopPropagation();
@@ -773,6 +800,8 @@
             if (j < 0 || j >= st.rules.length) return;
             var tmp = st.rules[i]; st.rules[i] = st.rules[j]; st.rules[j] = tmp;
           });
+        } else if (act === 'cleanup') {
+          App.cleanupCategories();
         } else if (act === 'apply-rules') {
           var n = 0;
           App.commit('Regeln angewendet', function (st) {
@@ -793,8 +822,48 @@
     };
   };
 
+  /** Ungenutzte Kategorien in einem Rutsch löschen. */
+  App.cleanupCategories = function () {
+    var s = App.state;
+    var U = C.categoryUsage(s);
+    var list = [];
+    [['expense', 'Ausgaben'], ['income', 'Einnahmen']].forEach(function (tp) {
+      C.categoryTree(s, tp[0]).forEach(function (node) {
+        node.children.forEach(function (k) { if (!U[k.id].used) list.push({ c: k, label: tp[1] + ' · ' + node.cat.name + ' › ' + k.name, parent: node.cat.id }); });
+        if (!U[node.cat.id].used) list.push({ c: node.cat, label: tp[1] + ' · ' + node.cat.name + (node.children.length ? ' (inkl. Unterkategorien)' : ''), main: true });
+      });
+    });
+    if (!list.length) return App.toast('Keine ungenutzten Kategorien.');
+    var form = App.modal({
+      title: list.length + ' ungenutzte Kategorien', wide: false, submitLabel: 'Ausgewählte löschen',
+      body: '<p class="help">Diese Kategorien haben keine Buchungen und stecken in keinem Dauerauftrag, keiner Regel, keinem Kredit und keinem Budget. Häkchen = löschen. Rückgängig mit Strg+Z.</p>' +
+        '<div class="row mb"><button type="button" class="btn small" data-all="1">Alle</button><button type="button" class="btn small" data-all="0">Keine</button></div>' +
+        '<div class="tbl-wrap" style="max-height:55vh"><table class="tbl"><tbody>' + list.map(function (x, i) {
+          return '<tr><td class="cb"><input type="checkbox" name="c' + i + '" checked></td><td' + (x.main ? ' class="bold"' : '') + '>' + esc(x.label) + '</td></tr>';
+        }).join('') + '</tbody></table></div>',
+      onSubmit: function (form) {
+        var del = {};
+        list.forEach(function (x, i) { if (form.elements['c' + i].checked) del[x.c.id] = true; });
+        var n = 0;
+        App.commit('Kategorien aufgeräumt', function (st) {
+          // Hauptkategorien nur löschen, wenn danach keine Unterkategorie mehr übrig ist
+          st.categories.forEach(function (c) {
+            if (del[c.id] && !c.parentId && st.categories.some(function (k) { return k.parentId === c.id && !del[k.id]; })) delete del[c.id];
+          });
+          var before = st.categories.length;
+          st.categories = st.categories.filter(function (c) { return !del[c.id]; });
+          n = before - st.categories.length;
+        });
+        App.toast(n + ' Kategorien gelöscht.', { undo: true });
+      }
+    });
+    $$('[data-all]', form).forEach(function (b) {
+      b.onclick = function () { var on = b.dataset.all === '1'; list.forEach(function (x, i) { form.elements['c' + i].checked = on; }); };
+    });
+  };
+
   function budgetInput(c, placeholder) {
-    return '<input type="text" class="amount budget-in" data-budget="' + c.id + '" value="' + (c.budget ? esc(C.formatAmountInput(c.budget)) : '') + '" placeholder="' + esc(placeholder || '–') + '" title="Monatsbudget in €" style="width:110px;padding:3px 7px">';
+    return '<input type="text" class="amount budget-in" data-budget="' + c.id + '" value="' + (c.budget ? esc(C.formatAmountInput(c.budget)) : '') + '" placeholder="' + esc(placeholder || '–') + '" title="Monatsbudget in €" style="width:88px;padding:3px 7px">';
   }
 
   App.editCategory = function (c, preset) {

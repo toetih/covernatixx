@@ -773,6 +773,43 @@
     });
   }
 
+  /**
+   * Verwendung je Kategorie: { id: { tx, last, recurring, rules, loans, budget, used } }.
+   * Hauptkategorien gelten als genutzt, wenn sie selbst oder eine Unterkategorie genutzt wird
+   * (Felder *Total enthalten die Summen inkl. Unterkategorien).
+   */
+  function categoryUsage(state) {
+    var u = {};
+    state.categories.forEach(function (c) { u[c.id] = { tx: 0, last: null, recurring: 0, rules: 0, loans: 0, budget: !!c.budget }; });
+    state.transactions.forEach(function (t) {
+      var x = u[t.categoryId];
+      if (!x) return;
+      x.tx++;
+      if (!x.last || t.date > x.last) x.last = t.date;
+    });
+    state.recurring.forEach(function (r) { if (u[r.categoryId]) u[r.categoryId].recurring++; });
+    (state.rules || []).forEach(function (r) { if (u[r.categoryId]) u[r.categoryId].rules++; });
+    state.accounts.forEach(function (a) { if (a.loan && u[a.loan.interestCategoryId]) u[a.loan.interestCategoryId].loans++; });
+    Object.keys(u).forEach(function (id) {
+      var x = u[id];
+      x.usedSelf = !!(x.tx || x.recurring || x.rules || x.loans || x.budget);
+    });
+    state.categories.forEach(function (c) {
+      var x = u[c.id];
+      x.txTotal = x.tx; x.lastTotal = x.last; x.used = x.usedSelf;
+      if (c.parentId) return;
+      state.categories.forEach(function (k) {
+        if (k.parentId !== c.id) return;
+        var y = u[k.id];
+        x.txTotal += y.tx;
+        if (y.last && (!x.lastTotal || y.last > x.lastTotal)) x.lastTotal = y.last;
+        if (y.usedSelf) x.used = true;
+      });
+    });
+    state.categories.forEach(function (c) { if (c.parentId) u[c.id].used = u[c.id].usedSelf; });
+    return u;
+  }
+
   function descendantIds(state, id) {
     var out = [id];
     state.categories.forEach(function (c) { if (c.parentId === id) out.push(c.id); });
@@ -1368,7 +1405,7 @@
     holdings: holdings, depotValue: depotValue, saveTrade: saveTrade, deleteTrade: deleteTrade,
     syncTradeTransaction: syncTradeTransaction, roundQty: roundQty,
     // Kategorien & Auswertung
-    categoryPath: categoryPath, mainCategoryId: mainCategoryId, categoryTree: categoryTree, descendantIds: descendantIds,
+    categoryPath: categoryPath, mainCategoryId: mainCategoryId, categoryTree: categoryTree, categoryUsage: categoryUsage, descendantIds: descendantIds,
     categoryReport: categoryReport, plannedEntries: plannedEntries, reportMonth: reportMonth, categorySpent: categorySpent, PALETTE: PALETTE,
     applyRules: applyRules, suggestCategory: suggestCategory,
     // CSV

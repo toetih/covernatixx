@@ -376,3 +376,34 @@ test('Gehalt am Monatsende zählt zum Folgemonat', () => {
   assert.equal(C.reportMonth({ date: '2025-12-31', nextMonth: true }), '2026-01');
   assert.equal(C.categorySpent(s, 'geh', '2025-09-01', '2025-09-30'), 400000);
 });
+
+test('Kategorie-Verwendung: Buchungen, Regeln, Daueraufträge, Kredit, Budget', () => {
+  const s = baseState();
+  s.categories = [
+    { id: 'm1', name: 'Wohnen', parentId: null, type: 'expense' },
+    { id: 's1', name: 'Miete', parentId: 'm1', type: 'expense' },
+    { id: 's2', name: 'Strom', parentId: 'm1', type: 'expense' },
+    { id: 's3', name: 'Zinsen', parentId: 'm1', type: 'expense' },
+    { id: 'm2', name: 'Hobby', parentId: null, type: 'expense' },
+    { id: 's4', name: 'Musik', parentId: 'm2', type: 'expense', budget: 5000 },
+    { id: 'm3', name: 'Leer', parentId: null, type: 'expense' },
+    { id: 's5', name: 'Nix', parentId: 'm3', type: 'expense' }
+  ];
+  s.transactions.push({ id: 'a', date: '2025-01-05', accountId: 'giro', amount: -1, categoryId: 's1', tags: [] });
+  s.transactions.push({ id: 'b', date: '2025-03-05', accountId: 'giro', amount: -1, categoryId: 's1', tags: [] });
+  s.recurring.push({ id: 'r', categoryId: 's2' });
+  s.accounts.push({ id: 'k', type: 'darlehen', loan: { interestCategoryId: 's3' } });
+  const u = C.categoryUsage(s);
+  assert.equal(u.s1.tx, 2);
+  assert.equal(u.s1.last, '2025-03-05');
+  assert.equal(u.s2.recurring, 1);
+  assert.equal(u.s3.loans, 1);
+  assert.equal(u.m1.txTotal, 2);
+  assert.equal(u.m1.lastTotal, '2025-03-05');
+  assert.equal(u.m1.used, true);
+  assert.equal(u.m1.usedSelf, false);
+  assert.equal(u.s4.used, true);     // Budget zählt als Verwendung
+  assert.equal(u.m2.used, true);
+  assert.equal(u.m3.used, false);
+  assert.equal(u.s5.used, false);
+});

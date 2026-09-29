@@ -618,18 +618,21 @@
     });
     rows.forEach(function (r, i) {
       var cx = L + slot * i + slot / 2;
-      svg += bar(cx - bw - 1, r.a, 'var(--series-1)') + bar(cx + 1, r.b, 'var(--series-2)');
+      // geplanter Anteil: ganzer Balken hell, gebuchter Anteil kräftig darüber
+      if (r.pa) svg += bar(cx - bw - 1, r.a, 'var(--series-1)', 0.35);
+      if (r.pb) svg += bar(cx + 1, r.b, 'var(--series-2)', 0.35);
+      svg += bar(cx - bw - 1, r.a - (r.pa || 0), 'var(--series-1)') + bar(cx + 1, r.b - (r.pb || 0), 'var(--series-2)');
       svg += '<text x="' + cx + '" y="' + (H - 8) + '" text-anchor="middle">' + esc(r.label) + '</text>';
       svg += '<rect x="' + (L + slot * i) + '" y="' + T + '" width="' + slot + '" height="' + (H - T - B) + '" fill="transparent" data-tip="' +
-        esc(r.label + ' – ' + names[0] + ': ' + C.formatMoney(r.a) + ' · ' + names[1] + ': ' + C.formatMoney(r.b) + ' · Saldo: ' + C.formatMoney(r.a - r.b, { sign: true })) + '"/>';
+        esc(r.label + ' – ' + names[0] + ': ' + C.formatMoney(r.a) + ' · ' + names[1] + ': ' + C.formatMoney(r.b) + ' · Saldo: ' + C.formatMoney(r.a - r.b, { sign: true }) + ((r.pa || r.pb) ? ' (davon geplant: +' + C.formatMoney(r.pa || 0) + ' / −' + C.formatMoney(r.pb || 0) + ')' : '')) + '"/>';
     });
-    function bar(x0, v, color) {
-      if (!v) return '';
+    function bar(x0, v, color, opacity) {
+      if (!v || v < 0) return '';
       var h = Math.max(1, (H - T - B) * v / max);
       var y0 = H - B - h;
       var rr = Math.min(4, h, bw / 2);
       // oben abgerundet, unten gerade (an der Nulllinie)
-      return '<path d="M' + x0 + ' ' + (H - B) + ' V' + (y0 + rr) + ' Q' + x0 + ' ' + y0 + ' ' + (x0 + rr) + ' ' + y0 + ' H' + (x0 + bw - rr) + ' Q' + (x0 + bw) + ' ' + y0 + ' ' + (x0 + bw) + ' ' + (y0 + rr) + ' V' + (H - B) + ' Z" fill="' + color + '"/>';
+      return '<path d="M' + x0 + ' ' + (H - B) + ' V' + (y0 + rr) + ' Q' + x0 + ' ' + y0 + ' ' + (x0 + rr) + ' ' + y0 + ' H' + (x0 + bw - rr) + ' Q' + (x0 + bw) + ' ' + y0 + ' ' + (x0 + bw) + ' ' + (y0 + rr) + ' V' + (H - B) + ' Z" fill="' + color + '"' + (opacity ? ' opacity="' + opacity + '"' : '') + '/>';
     }
     return svg + '</svg>';
   };

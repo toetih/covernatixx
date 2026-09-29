@@ -211,6 +211,8 @@ label.chk { display: inline-flex; align-items: center; gap: 6px; cursor: pointer
 .tbl-wrap.tall { max-height: calc(100vh - 330px); min-height: 240px; }
 .pivot td, .pivot th { padding: 6px 8px; font-size: 13px; }
 .pivot td.num.click:hover { background: var(--accent-soft); cursor: pointer; }
+.pivot td.plan, .pivot th.plan { font-style: italic; color: var(--muted); }
+.pivot td.plan-part { font-style: italic; }
 .pivot th:first-child, .pivot td:first-child { position: sticky; left: 0; background: var(--surface); z-index: 2; min-width: 200px; }
 .pivot tr.group-row td:first-child { background: var(--surface-2); }
 .pivot th:first-child { z-index: 3; background: var(--surface-2); }

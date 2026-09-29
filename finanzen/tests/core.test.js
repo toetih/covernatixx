@@ -306,3 +306,28 @@ test('Kredit: letzte Rate nur bis Restschuld, danach Regel inaktiv', () => {
   assert.equal(pays.length, 1);
   assert.equal(pays[0].amount, -(100000 + Math.round(100000 * 3.5 / 1200)));
 });
+
+test('Auswertung mit geplanten Buchungen (Einnahmen, Ausgaben, Kreditzinsen)', () => {
+  const s = loanState();
+  s.recurring.push({ id: 'gehalt', name: 'Gehalt', active: true, mode: 'auto', unit: 'month', interval: 1, accountId: 'giro', amount: 400000, categoryId: 'geh', nextDate: '2025-08-25', anchorDay: 25 });
+  s.recurring.push({ id: 'bonus', name: 'Bonus', active: true, mode: 'confirm', unit: 'year', interval: 1, accountId: 'giro', amount: 100000, categoryId: 'geh', nextDate: '2025-07-15', anchorDay: 15 });
+  s.recurring.push({ id: 'spar', name: 'Sparen', active: true, mode: 'auto', unit: 'month', interval: 1, accountId: 'giro', counterAccountId: 'tg', amount: -50000, nextDate: '2025-08-01', anchorDay: 1 });
+  s.categories.push({ id: 'geh', name: 'Gehalt', type: 'income', parentId: null });
+  s.transactions.push({ id: 'x', date: '2025-07-10', accountId: 'giro', amount: -2000, categoryId: null, tags: [] });
+  const opts = { from: '2025-07-01', to: '2025-09-30', today: '2025-07-20', planned: true };
+  const r = C.categoryReport(s, opts);
+  // Juli: gebuchte Ausgabe + überfälliger Bonus (bestätigen) + Kreditzinsen 30.07.
+  assert.equal(r.planned.income['2025-07'], 100000);
+  assert.equal(r.planned.expense['2025-07'], -87500);
+  assert.equal(r.expense['2025-07'], -2000 - 87500);
+  // August/September: Gehalt + fallende Zinsen; Umbuchung zählt nicht
+  assert.equal(r.income['2025-08'], 400000);
+  assert.equal(r.planned.expense['2025-08'], -Math.round((30000000 - 62500) * 3.5 / 1200));
+  assert.ok(r.planned.expense['2025-09'] > r.planned.expense['2025-08']);
+  assert.equal(r.byCat.zins['2025-07'], -87500);
+  assert.equal(r.none.expense['2025-07'], -2000);
+  // Ohne planned: nur Gebuchtes
+  const r2 = C.categoryReport(s, Object.assign({}, opts, { planned: false }));
+  assert.equal(r2.income['2025-08'], 0);
+  assert.equal(r2.expense['2025-07'], -2000);
+});

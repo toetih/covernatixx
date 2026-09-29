@@ -784,23 +784,82 @@
    * opts: { from, to, accountIds (Array|null) }
    * Rückgabe: { months:[...], byCat: {catId: {month: cents}}, byMain: {...}, income: {month}, expense: {month} }
    */
+  /**
+   * Geplante Einnahmen/Ausgaben aus aktiven wiederkehrenden Buchungen (noch nicht gebucht) bis toIso.
+   * Enthält Einnahmen, Ausgaben und bei Krediten den Zinsanteil (Tilgung ist keine Ausgabe).
+   * Umbuchungen und Sparpläne zählen – wie gebuchte – nicht als Einnahme/Ausgabe.
+   * Rückgabe: [{ date, amount, categoryId, accountId, ruleId }]
+   */
+  function plannedEntries(state, today, toIso) {
+    var out = [];
+    state.recurring.forEach(function (rule) {
+      if (!rule.active) return;
+      var kind = ruleKind(rule);
+      var dates = occurrences(rule, toIso, 1000).filter(function (d) { return rule.mode !== 'auto' || d > today; });
+      if (kind === 'income' || kind === 'expense') {
+        dates.forEach(function (d) {
+          out.push({ date: d, amount: rule.amount, categoryId: rule.categoryId || null, accountId: rule.accountId, ruleId: rule.id });
+        });
+      } else if (kind === 'loan') {
+        var la = findById(state.accounts, rule.loanAccountId);
+        if (!la) return;
+        var debt = loanDebt(state, la.id, today);
+        var rate = loanRate(la);
+        dates.forEach(function (d) {
+          if (debt <= 0) return;
+          var interest = Math.round(debt * rate / 1200);
+          var pay = Math.min(Math.abs(rule.amount), debt + interest);
+          debt -= pay - interest;
+          if (interest > 0) out.push({ date: d, amount: -interest, categoryId: (la.loan && la.loan.interestCategoryId) || null, accountId: la.id, ruleId: rule.id });
+        });
+      }
+    });
+    return out;
+  }
+
+  /**
+   * Summen je Kategorie und Monat.
+   * opts: { from, to, accountIds (Array|null), planned: bool, today }
+   * Rückgabe: { months, byCat, byMain, income, expense, none: {income, expense},
+   *             planned: { byCat, byMain, income, expense, none } }  – planned = nur der geplante Anteil
+   * Mit planned=true enthalten die Hauptwerte gebucht + geplant.
+   */
   function categoryReport(state, opts) {
     var months = monthRange(opts.from, opts.to);
     var accSet = opts.accountIds ? toSet(opts.accountIds) : null;
-    var byCat = {}, byMain = {}, income = {}, expense = {};
-    months.forEach(function (m) { income[m] = 0; expense[m] = 0; });
+    function bucket() {
+      var b = { byCat: {}, byMain: {}, income: {}, expense: {}, none: { income: {}, expense: {} } };
+      months.forEach(function (m) { b.income[m] = 0; b.expense[m] = 0; });
+      return b;
+    }
+    var all = bucket(), plan = bucket();
+    function book(b, date, amount, categoryId) {
+      var m = monthKey(date);
+      var cid = categoryId && findById(state.categories, categoryId) ? categoryId : '__none';
+      var mid = cid === '__none' ? '__none' : mainCategoryId(state, cid);
+      add(b.byCat, cid, m, amount);
+      add(b.byMain, mid, m, amount);
+      if (amount >= 0) b.income[m] += amount; else b.expense[m] += amount;
+      if (cid === '__none') add(b.none, amount >= 0 ? 'income' : 'expense', m, amount);
+    }
     state.transactions.forEach(function (t) {
       if (t.date < opts.from || t.date > opts.to) return;
       if (!isIncomeExpense(t)) return;
       if (accSet && !accSet[t.accountId]) return;
-      var m = monthKey(t.date);
-      var cid = t.categoryId && findById(state.categories, t.categoryId) ? t.categoryId : '__none';
-      var mid = cid === '__none' ? '__none' : mainCategoryId(state, cid);
-      add(byCat, cid, m, t.amount);
-      add(byMain, mid, m, t.amount);
-      if (t.amount >= 0) income[m] += t.amount; else expense[m] += t.amount;
+      book(all, t.date, t.amount, t.categoryId);
     });
-    return { months: months, byCat: byCat, byMain: byMain, income: income, expense: expense };
+    if (opts.planned) {
+      plannedEntries(state, opts.today || todayISO(), opts.to).forEach(function (e) {
+        if (e.date < opts.from || e.date > opts.to) return;
+        if (accSet && !accSet[e.accountId]) return;
+        book(all, e.date, e.amount, e.categoryId);
+        book(plan, e.date, e.amount, e.categoryId);
+      });
+    }
+    return {
+      months: months, byCat: all.byCat, byMain: all.byMain, income: all.income, expense: all.expense, none: all.none,
+      planned: plan
+    };
   }
 
   function add(obj, key, m, v) {
@@ -1242,7 +1301,7 @@
     syncTradeTransaction: syncTradeTransaction, roundQty: roundQty,
     // Kategorien & Auswertung
     categoryPath: categoryPath, mainCategoryId: mainCategoryId, categoryTree: categoryTree, descendantIds: descendantIds,
-    categoryReport: categoryReport, categorySpent: categorySpent, PALETTE: PALETTE,
+    categoryReport: categoryReport, plannedEntries: plannedEntries, categorySpent: categorySpent, PALETTE: PALETTE,
     applyRules: applyRules, suggestCategory: suggestCategory,
     // CSV
     parseCSV: parseCSV, detectDelimiter: detectDelimiter, detectHeaderRow: detectHeaderRow, guessMapping: guessMapping,

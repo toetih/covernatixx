@@ -96,6 +96,7 @@
   };
 
   function kpi(l, v) { return '<div class="kpi"><div class="l">' + esc(l) + '</div><div class="v">' + v + '</div></div>'; }
+  function kpiS(l, v, sub) { return '<div class="kpi"><div class="l">' + esc(l) + '</div><div class="v">' + v + '</div><div class="s">' + (sub || '&nbsp;') + '</div></div>'; }
 
   function securityOptions(selected, withNew) {
     var list = App.state.securities.slice().sort(function (a, b) { return a.name.localeCompare(b.name, 'de'); });
@@ -537,7 +538,7 @@
   };
 
   // ================================================================ AUSWERTUNG
-  App.ui.rep = { period: 'thisYear', year: null, account: '', detail: false };
+  App.ui.rep = { period: 'thisYear', year: null, account: '', detail: false, planned: true };
 
   App.views.auswertung = function (el) {
     var s = App.state;
@@ -546,18 +547,24 @@
     var years = {};
     s.transactions.forEach(function (x) { years[x.date.slice(0, 4)] = true; });
     years[t.slice(0, 4)] = true;
+    years[String(+t.slice(0, 4) + 1)] = true;
     var yearList = Object.keys(years).sort().reverse();
     var range;
     if (f.period === 'last12') range = App.periodRange('last12');
+    else if (f.period === 'next12') range = [C.startOfMonth(t), C.endOfMonth(C.addMonths(C.startOfMonth(t), 11, 1))];
     else { var y = f.year || t.slice(0, 4); range = [y + '-01-01', y + '-12-31']; }
     var accIds = App.accountFilterIds(f.account);
-    var rep = C.categoryReport(s, { from: range[0], to: range[1], accountIds: accIds });
+    var rep = C.categoryReport(s, { from: range[0], to: range[1], accountIds: accIds, planned: f.planned, today: t });
+    var P = rep.planned;
     var months = rep.months;
+    var curMonth = C.monthKey(t);
+    function sumOf(o) { var x = 0; months.forEach(function (m) { x += (o && o[m]) || 0; }); return x; }
 
     var html = '<div class="page-head"><div><h1>Auswertung</h1><div class="sub">Einnahmen und Ausgaben nach Kategorie – Umbuchungen und Wertpapierkäufe zählen nicht mit. Klick auf einen Betrag zeigt die Buchungen.</div></div>' +
-      '<div class="actions"><select data-f="period"><option value="last12"' + sel('last12', f.period) + '>Letzte 12 Monate</option>' +
+      '<div class="actions"><select data-f="period"><option value="last12"' + sel('last12', f.period) + '>Letzte 12 Monate</option><option value="next12"' + sel('next12', f.period) + '>Nächste 12 Monate</option>' +
       yearList.map(function (y) { return '<option value="y' + y + '"' + (f.period === 'year' && (f.year || t.slice(0, 4)) === y || (f.period === 'thisYear' && y === t.slice(0, 4)) ? ' selected' : '') + '>Jahr ' + y + '</option>'; }).join('') + '</select>' +
       '<select data-f="account"><option value="">Alle Konten</option>' + App.accountOptions(f.account, { groups: true, includeArchived: true }) + '</select>' +
+      '<label class="chk" title="Wiederkehrende Buchungen, die noch nicht gebucht sind"><input type="checkbox" data-f="planned"' + (f.planned ? ' checked' : '') + '> Geplante einbeziehen</label>' +
       '<label class="chk"><input type="checkbox" data-f="detail"' + (f.detail ? ' checked' : '') + '> Unterkategorien</label>' +
       '<button class="btn" data-act="print">Drucken</button></div></div>';
 
@@ -566,32 +573,39 @@
     // Ø nur über Monate, in denen es schon Daten gibt (nicht über Zukunft oder Zeit vor der ersten Buchung)
     var firstMonth = s.transactions.reduce(function (mn, x) { return !mn || x.date < mn ? x.date : mn; }, null);
     firstMonth = firstMonth ? C.monthKey(firstMonth) : C.monthKey(t);
-    var elapsed = months.filter(function (m) { return m <= C.monthKey(t) && m >= firstMonth; }).length || 1;
+    // Mit Planwerten zählen auch künftige Monate mit
+    var elapsed = months.filter(function (m) { return (f.planned || m <= curMonth) && m >= firstMonth; }).length || 1;
     var anyBudget = s.categories.some(function (c) { return c.budget; });
-    html += '<div class="kpis">' + kpi('Einnahmen', money(totalIn)) + kpi('Ausgaben', money(totalOut)) +
-      kpi('Saldo', money(totalIn + totalOut, { color: true })) +
+    var pIn = sumOf(P.income), pOut = sumOf(P.expense);
+    function planSub(v) { return v ? 'davon geplant ' + esc(C.formatMoney(v)) : ''; }
+    html += '<div class="kpis">' + kpiS('Einnahmen', money(totalIn), planSub(pIn)) + kpiS('Ausgaben', money(totalOut), planSub(pOut)) +
+      kpiS('Saldo', money(totalIn + totalOut, { color: true }), (pIn || pOut) ? 'inkl. Plan' : '') +
       kpi('Sparquote', esc(totalIn > 0 ? C.formatPercent((totalIn + totalOut) / totalIn).replace('+', '') : '–')) +
       kpi('Ø Ausgaben / Monat', money(Math.round(totalOut / elapsed))) + '</div>';
 
-    html += '<div class="card"><div class="card-head"><h2>Einnahmen und Ausgaben je Monat</h2><div class="legend"><span><i style="background:var(--series-1)"></i>Einnahmen</span><span><i style="background:var(--series-2)"></i>Ausgaben</span></div></div><div class="card-body">' +
-      App.barChart(months.map(function (m) { return { label: C.formatMonth(m), a: rep.income[m], b: -rep.expense[m] }; }), ['Einnahmen', 'Ausgaben']) + '</div></div>';
+    html += '<div class="card"><div class="card-head"><h2>Einnahmen und Ausgaben je Monat</h2><div class="legend"><span><i style="background:var(--series-1)"></i>Einnahmen</span><span><i style="background:var(--series-2)"></i>Ausgaben</span>' + ((pIn || pOut) ? '<span><i style="background:var(--muted);opacity:.35"></i>heller = geplant</span>' : '') + '</div></div><div class="card-body">' +
+      App.barChart(months.map(function (m) { return { label: C.formatMonth(m), a: rep.income[m], b: -rep.expense[m], pa: P.income[m] || 0, pb: -(P.expense[m] || 0) }; }), ['Einnahmen', 'Ausgaben']) + '</div></div>';
 
     // Pivot-Tabelle
     html += '<div class="card"><div class="card-head"><h2>Kategorien × Monate</h2><button class="btn small" data-act="csv">CSV</button></div><div class="card-body flush tbl-wrap"><table class="tbl pivot"><thead><tr><th>Kategorie</th>' +
-      months.map(function (m) { return '<th class="num">' + esc(C.formatMonth(m)) + '</th>'; }).join('') + '<th class="num">Summe</th><th class="num">Ø Monat</th>' + (anyBudget ? '<th class="num">Budget</th>' : '') + '</tr></thead><tbody>';
+      months.map(function (m) { return '<th class="num' + (f.planned && m > curMonth ? ' plan' : '') + '"' + (f.planned && m > curMonth ? ' title="Planwerte"' : '') + '>' + esc(C.formatMonth(m)) + '</th>'; }).join('') + '<th class="num">Summe</th><th class="num">Ø Monat</th>' + (anyBudget ? '<th class="num">Budget</th>' : '') + '</tr></thead><tbody>';
     var csvRows = [['Kategorie'].concat(months, ['Summe'])];
     function row(label, data, opts) {
       opts = opts || {};
-      var sum = 0;
+      var sum = 0, psum = 0;
+      var pdata = opts.pdata || {};
       var cells = months.map(function (m) {
-        var v = data[m] || 0;
-        sum += v;
+        var v = data[m] || 0, pv = pdata[m] || 0;
+        sum += v; psum += pv;
         var over = opts.budget && -v > opts.budget;
-        return '<td class="num' + (opts.cat ? ' click' : '') + (over ? ' neg' : '') + '"' + (opts.cat ? ' data-cat="' + opts.cat + '" data-m="' + m + '"' : '') + '>' + (v ? esc(C.formatMoney(v)) : '<span class="muted">·</span>') + '</td>';
+        var pure = pv && pv === v;               // nur Plan, nichts gebucht
+        var cls = (opts.cat && !pure ? ' click' : '') + (over ? ' neg' : '') + (pure ? ' plan' : (pv ? ' plan-part' : ''));
+        var title = pv ? (pure ? 'geplant' : 'davon geplant ' + C.formatMoney(pv)) : '';
+        return '<td class="num' + cls + '"' + (title ? ' title="' + esc(title) + '"' : '') + (opts.cat && !pure ? ' data-cat="' + opts.cat + '" data-m="' + m + '"' : '') + '>' + (v ? esc(C.formatMoney(v)) : '<span class="muted">·</span>') + '</td>';
       }).join('');
       csvRows.push([label].concat(months.map(function (m) { return C.formatAmountInput(data[m] || 0); }), [C.formatAmountInput(sum)]));
       return '<tr class="' + (opts.cls || '') + '"><td class="' + (opts.sub ? 'sub' : '') + '">' + (opts.dot ? '<span class="cat-dot" style="background:' + esc(opts.dot) + '"></span>' : '') + esc(label) + '</td>' + cells +
-        '<td class="num bold' + (opts.cat ? ' click' : '') + '"' + (opts.cat ? ' data-cat="' + opts.cat + '" data-m=""' : '') + '>' + esc(C.formatMoney(sum)) + '</td><td class="num">' + esc(C.formatMoney(Math.round(sum / elapsed))) + '</td>' + (anyBudget ? '<td class="num muted">' + (opts.budget ? esc(C.formatMoney(opts.budget)) : '') + '</td>' : '') + '</tr>';
+        '<td class="num bold' + (opts.cat ? ' click' : '') + (psum ? ' plan-part' : '') + '"' + (psum ? ' title="davon geplant ' + esc(C.formatMoney(psum)) + '"' : '') + (opts.cat ? ' data-cat="' + opts.cat + '" data-m=""' : '') + '>' + esc(C.formatMoney(sum)) + '</td><td class="num">' + esc(C.formatMoney(Math.round(sum / elapsed))) + '</td>' + (anyBudget ? '<td class="num muted">' + (opts.budget ? esc(C.formatMoney(opts.budget)) : '') + '</td>' : '') + '</tr>';
     }
     [['income', 'Einnahmen', rep.income], ['expense', 'Ausgaben', rep.expense]].forEach(function (sec) {
       html += '<tr class="group-row"><td colspan="' + (months.length + (anyBudget ? 4 : 3)) + '">' + sec[1] + '</td></tr>';
@@ -606,31 +620,21 @@
       });
       rowsOut.sort(function (a, b) { return sec[0] === 'income' ? b.total - a.total : a.total - b.total; });
       rowsOut.forEach(function (r) {
-        html += row(r.node.cat.name, r.data, { cat: r.node.cat.id, dot: r.node.cat.color, cls: f.detail && r.node.children.length ? 'bold' : '', budget: sec[0] === 'expense' ? App.budgetFor(r.node.cat) : 0 });
+        html += row(r.node.cat.name, r.data, { cat: r.node.cat.id, pdata: P.byMain[r.node.cat.id], dot: r.node.cat.color, cls: f.detail && r.node.children.length ? 'bold' : '', budget: sec[0] === 'expense' ? App.budgetFor(r.node.cat) : 0 });
         if (f.detail) {
-          if (rep.byCat[r.node.cat.id] && r.node.children.length) html += row('(allgemein)', rep.byCat[r.node.cat.id], { cat: r.node.cat.id, sub: true });
-          r.node.children.forEach(function (c) { if (rep.byCat[c.id]) html += row(c.name, rep.byCat[c.id], { cat: c.id, sub: true, budget: sec[0] === 'expense' ? c.budget : 0 }); });
+          if (rep.byCat[r.node.cat.id] && r.node.children.length) html += row('(allgemein)', rep.byCat[r.node.cat.id], { cat: r.node.cat.id, pdata: P.byCat[r.node.cat.id], sub: true });
+          r.node.children.forEach(function (c) { if (rep.byCat[c.id]) html += row(c.name, rep.byCat[c.id], { cat: c.id, pdata: P.byCat[c.id], sub: true, budget: sec[0] === 'expense' ? c.budget : 0 }); });
         }
       });
       // Ohne Kategorie (nach Vorzeichen getrennt)
-      var none = rep.byCat.__none;
-      if (none) {
-        var part = {};
-        s.transactions.forEach(function (x) {
-          if (x.date < range[0] || x.date > range[1] || !C.isIncomeExpense(x) || (x.categoryId && cat(x.categoryId))) return;
-          if (accIds && accIds.indexOf(x.accountId) < 0) return;
-          if ((sec[0] === 'income') !== (x.amount >= 0)) return;
-          var m = C.monthKey(x.date);
-          part[m] = (part[m] || 0) + x.amount;
-        });
-        if (Object.keys(part).length) html += row('Ohne Kategorie', part, { cat: '__none', dot: '#999' });
-      }
-      html += row('Summe ' + sec[1], sec[2], { cls: 'sum-row' });
+      var part = rep.none[sec[0]];
+      if (Object.keys(part).length) html += row('Ohne Kategorie', part, { cat: '__none', pdata: P.none[sec[0]], dot: '#999' });
+      html += row('Summe ' + sec[1], sec[2], { cls: 'sum-row', pdata: sec[0] === 'income' ? P.income : P.expense });
     });
-    var saldo = {};
-    months.forEach(function (m) { saldo[m] = rep.income[m] + rep.expense[m]; });
-    html += row('Saldo', saldo, { cls: 'sum-row' });
-    html += '</tbody></table></div></div>';
+    var saldo = {}, psaldo = {};
+    months.forEach(function (m) { saldo[m] = rep.income[m] + rep.expense[m]; psaldo[m] = (P.income[m] || 0) + (P.expense[m] || 0); });
+    html += row('Saldo', saldo, { cls: 'sum-row', pdata: psaldo });
+    html += '</tbody></table></div>' + ((pIn || pOut) ? '<div class="help" style="padding:8px 16px"><i>Kursiv</i> = enthält geplante Buchungen aus „Wiederkehrend“ (noch nicht gebucht; bei Krediten der Zinsanteil). Maus auf einen Wert zeigt den geplanten Anteil.</div>' : '') + '</div>';
 
     // Tags & Empfänger
     var tags = {}, payees = {};
@@ -654,9 +658,10 @@
       inp.onchange = function () {
         var k = inp.dataset.f;
         if (k === 'period') {
-          if (inp.value === 'last12') f.period = 'last12';
+          if (inp.value === 'last12' || inp.value === 'next12') f.period = inp.value;
           else { f.period = 'year'; f.year = inp.value.slice(1); }
         } else if (k === 'detail') f.detail = inp.checked;
+        else if (k === 'planned') f.planned = inp.checked;
         else f[k] = inp.value;
         App.render();
       };

@@ -65,6 +65,7 @@
     fileStatus: 'none',    // none | connected | needs-permission | error
     lastFileSave: null,
     lastError: null,
+    storageOk: true,       // false = Browser erlaubt keine Speicherung (Daten nur bis zum Schließen)
     onStatus: function () {},
 
     /** Lädt den Browser-Stand; stellt ggf. die Datei-Verbindung wieder her (ohne Rechteabfrage). */
@@ -72,7 +73,13 @@
       var self = this;
       var fallback = null;
       try { fallback = root.localStorage && localStorage.getItem('finanzen-state'); } catch (e) { /* ignore */ }
-      return idbGet('state').catch(function () { return null; }).then(function (state) {
+      self.storageOk = true;
+      return idbGet('state').catch(function () {
+        // IndexedDB gesperrt (z. B. eingebettete Vorschau) – geht wenigstens localStorage?
+        try { localStorage.setItem('finanzen-probe', '1'); localStorage.removeItem('finanzen-probe'); }
+        catch (e) { self.storageOk = false; }
+        return null;
+      }).then(function (state) {
         if (!state && fallback) { try { state = JSON.parse(fallback); } catch (e) { state = null; } }
         if (!fileSupported) return state;
         return idbGet('fileHandle').catch(function () { return null; }).then(function (h) {

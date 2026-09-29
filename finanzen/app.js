@@ -318,7 +318,9 @@
   function renderBanner() {
     var s = App.state;
     var html = '';
-    if (Store.fileStatus === 'needs-permission') {
+    if (!Store.storageOk && Store.fileStatus !== 'connected') {
+      html += '<div class="banner" style="border-color:var(--neg)"><span class="grow"><b>Achtung: Hier kann nichts gespeichert werden</b> (eingebettete Vorschau). Zum Ausprobieren okay – für echte Daten die Datei herunterladen und per Doppelklick in Chrome oder Edge öffnen.</span></div>';
+    } else if (Store.fileStatus === 'needs-permission') {
       html += '<div class="banner"><span class="grow">Deine Datei <b>' + esc(Store.fileName()) + '</b> ist verknüpft, braucht nach dem Neustart aber einmal deine Freigabe.</span><button class="btn primary" data-reconnect>Datei freigeben</button></div>';
     } else if (Store.fileStatus !== 'connected' && s.transactions.length > 20) {
       var last = s.meta.lastBackup;

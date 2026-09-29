@@ -6,7 +6,7 @@ Kein Server, kein Konto, keine Cloud: Die Daten bleiben auf deinem Rechner.
 ## Starten
 
 - **Online:** `https://www.covernatixx.de/finanzen/` in Chrome oder Edge öffnen. Die Seite ist nur das Programm, deine Daten werden nicht hochgeladen.
-- **Offline:** Den Ordner `finanzen/` irgendwo ablegen und `index.html` im Browser öffnen.
+- **Offline (empfohlen):** Die Einzeldatei `Finanzen.html` herunterladen, z. B. in den Dropbox-Ordner legen und per Doppelklick in Chrome oder Edge öffnen. Sie enthält die komplette App.
 
 Tipp: In Chrome/Edge über Menü › „Streamen, speichern und teilen“ › „Als App installieren“ bekommt die Seite ein eigenes Fenster und ein Symbol in der Taskleiste.
 
@@ -32,4 +32,5 @@ Tipp: In Chrome/Edge über Menü › „Streamen, speichern und teilen“ › �
 - `core.js`: Rechenlogik ohne Oberfläche (Salden, Wiederholungen, Depot mit Durchschnittskosten, CSV).
 - `store.js`: Speicherung (IndexedDB, optional JSON-Datei über die File System Access API).
 - `app.js`, `views.js`: Oberfläche. `style.css`: Design (hell/dunkel).
+- `Finanzen.html`: automatisch gebaute Einzeldatei, nach Code-Änderungen neu erzeugen mit `node finanzen/tools/bundle.js`.
 - Tests: `node --test finanzen/tests/*.test.js`

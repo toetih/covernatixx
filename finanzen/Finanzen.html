@@ -3965,18 +3965,38 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     var s = App.state;
     var counts = {};
     s.transactions.forEach(function (x) { if (x.categoryId) counts[x.categoryId] = (counts[x.categoryId] || 0) + 1; });
-    var html = '<div class="page-head"><div><h1>Kategorien &amp; Regeln</h1><div class="sub">Zwei Ebenen: Hauptkategorie › Unterkategorie. Budgets gelten pro Monat.</div></div>' +
+    // Durchschnitt der letzten 3 abgeschlossenen Monate als Orientierung fürs Budget
+    var t = today();
+    var avgFrom = C.addMonths(C.startOfMonth(t), -3, 1), avgTo = C.addDays(C.startOfMonth(t), -1);
+    var avgRep = C.categoryReport(s, { from: avgFrom, to: avgTo });
+    function avg(map, id) {
+      var o = map[id]; if (!o) return 0;
+      var sum = 0; Object.keys(o).forEach(function (k) { sum += o[k]; });
+      return Math.round(sum / 3);
+    }
+    function dash(v) { return v ? v : '<span class="muted">–</span>'; }
+    var html = '<div class="page-head"><div><h1>Kategorien &amp; Regeln</h1><div class="sub">Zwei Ebenen: Hauptkategorie › Unterkategorie. Klick auf eine Kategorie zum Umbenennen, Verschieben, Färben.</div></div>' +
       '<div class="actions"><button class="btn" data-act="new" data-type="income">+ Einnahme-Kategorie</button><button class="btn primary" data-act="new" data-type="expense">+ Ausgabe-Kategorie</button></div></div>';
     html += '<div class="grid two">';
     [['expense', 'Ausgaben'], ['income', 'Einnahmen']].forEach(function (tp) {
-      html += '<div class="card"><div class="card-head"><h2>' + tp[1] + '</h2></div><div class="card-body flush"><table class="tbl"><thead><tr><th>Kategorie</th><th class="num">Buchungen</th>' + (tp[0] === 'expense' ? '<th class="num">Budget/Monat</th>' : '') + '<th></th></tr></thead><tbody>';
+      var isExp = tp[0] === 'expense';
+      html += '<div class="card"><div class="card-head"><h2>' + tp[1] + '</h2>' + (isExp ? '<span class="help">Budget einfach eintippen · leer = kein Budget</span>' : '') + '</div><div class="card-body flush"><table class="tbl"><thead><tr><th>Kategorie</th><th class="num">Buchungen</th>' +
+        '<th class="num" title="Durchschnitt ' + C.formatDate(avgFrom) + ' – ' + C.formatDate(avgTo) + '">Ø 3 Monate</th>' + (isExp ? '<th class="num">Budget / Monat</th>' : '') + '<th></th></tr></thead><tbody>';
       C.categoryTree(s, tp[0]).forEach(function (node) {
         var c = node.cat;
-        html += '<tr class="click" data-cat="' + c.id + '"><td class="bold"><span class="cat-dot" style="background:' + esc(c.color) + '"></span>' + esc(c.name) + '</td><td class="num">' + (counts[c.id] || '') + '</td>' +
-          (tp[0] === 'expense' ? '<td class="num">' + (App.budgetFor(c) ? esc(C.formatMoney(App.budgetFor(c))) + (c.budget ? '' : ' <span class="small">Σ</span>') : '') + '</td>' : '') +
+        var total = (counts[c.id] || 0);
+        node.children.forEach(function (k) { total += counts[k.id] || 0; });
+        var sumKids = 0;
+        node.children.forEach(function (k) { sumKids += k.budget || 0; });
+        html += '<tr class="click" data-cat="' + c.id + '"><td class="bold"><span class="cat-dot" style="background:' + esc(c.color) + '"></span>' + esc(c.name) + '</td><td class="num">' + dash(total) + '</td>' +
+          '<td class="num">' + dash(avg(avgRep.byMain, c.id) ? esc(C.formatMoney(Math.abs(avg(avgRep.byMain, c.id)))) : 0) + '</td>' +
+          (isExp ? '<td class="num">' + budgetInput(c, sumKids ? 'Σ ' + C.formatAmountInput(sumKids) : '') + '</td>' : '') +
           '<td class="num"><button class="btn small ghost" data-act="sub" data-id="' + c.id + '" title="Unterkategorie hinzufügen">+ Unter</button></td></tr>';
         node.children.forEach(function (k) {
-          html += '<tr class="click" data-cat="' + k.id + '"><td class="sub">' + esc(k.name) + '</td><td class="num">' + (counts[k.id] || '') + '</td>' + (tp[0] === 'expense' ? '<td class="num">' + (k.budget ? esc(C.formatMoney(k.budget)) : '') + '</td>' : '') + '<td></td></tr>';
+          var a = avg(avgRep.byCat, k.id);
+          html += '<tr class="click" data-cat="' + k.id + '"><td class="sub">' + esc(k.name) + '</td><td class="num">' + dash(counts[k.id] || 0) + '</td>' +
+            '<td class="num">' + dash(a ? esc(C.formatMoney(Math.abs(a))) : 0) + '</td>' +
+            (isExp ? '<td class="num">' + budgetInput(k, '') + '</td>' : '') + '<td></td></tr>';
         });
       });
       html += '</tbody></table></div></div>';
@@ -3998,7 +4018,20 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     }
     html += '</div>';
     el.innerHTML = html;
+    $$('[data-budget]', el).forEach(function (inp) {
+      inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } });
+      inp.addEventListener('change', function () {
+        var v = inp.value.trim() ? Math.abs(C.parseMoney(inp.value)) : 0;
+        if (isNaN(v)) { inp.classList.add('invalid'); return; }
+        inp.classList.remove('invalid');
+        inp.value = v ? C.formatAmountInput(v) : '';
+        var id = inp.dataset.budget;
+        App.commit('Budget geändert', function (st) { C.findById(st.categories, id).budget = v; }, { render: false });
+        App.toast(v ? 'Budget ' + C.formatMoney(v) + ' gespeichert.' : 'Budget entfernt.');
+      });
+    });
     el.onclick = function (e) {
+      if (e.target.closest('input')) return;
       var a = e.target.closest('[data-act]');
       if (a) {
         e.stopPropagation();
@@ -4032,6 +4065,10 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       if (c) App.editCategory(cat(c.dataset.cat));
     };
   };
+
+  function budgetInput(c, placeholder) {
+    return '<input type="text" class="amount budget-in" data-budget="' + c.id + '" value="' + (c.budget ? esc(C.formatAmountInput(c.budget)) : '') + '" placeholder="' + esc(placeholder || '–') + '" title="Monatsbudget in €" style="width:110px;padding:3px 7px">';
+  }
 
   App.editCategory = function (c, preset) {
     var s = App.state;

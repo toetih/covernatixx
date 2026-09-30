@@ -1,0 +1,1316 @@
+<title>Familienkompass</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;600&family=Lexend:wght@300;400;500;600;700&display=swap">
+<style>
+/* Layout: ruhige "Kühlschrank-Tafel" – eine Spalte am iPhone mit Tab-Leiste unten,
+   Seitenleiste + zwei Spalten ab iPad-Breite. Ein Akzent (Farn-Grün), Sonnengelb nur für Sterne,
+   Timer-Rot nur für ablaufende Zeit. */
+:root{
+  --bg:#EDF2EF; --surface:#FFFFFF; --surface-2:#E3EBE6; --ink:#14201C; --muted:#56685F; --line:#D0DBD4;
+  --accent:#1B6B54; --accent-ink:#FFFFFF; --accent-soft:#D4EADF; --sun:#D99612; --sun-soft:#FBEFD2;
+  --timer:#E0533C; --timer-soft:#F9DED8; --danger:#B3432D;
+  --f-ui:"Lexend", ui-rounded, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-num:"Atkinson Hyperlegible Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --r:16px; --r-s:10px;
+  --shadow:0 1px 2px rgb(20 32 28 / .05), 0 6px 20px rgb(20 32 28 / .06);
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0F1513; --surface:#18211E; --surface-2:#222C28; --ink:#E5EEE9; --muted:#95A79F; --line:#2D3A35;
+  --accent:#5CC9A2; --accent-ink:#0A1913; --accent-soft:#1D3A2F; --sun:#F2BD4B; --sun-soft:#3A301A;
+  --timer:#F07A62; --timer-soft:#3E231D; --danger:#E6826A;
+  --shadow:0 1px 2px rgb(0 0 0 / .3), 0 6px 20px rgb(0 0 0 / .25); color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#0F1513; --surface:#18211E; --surface-2:#222C28; --ink:#E5EEE9; --muted:#95A79F; --line:#2D3A35;
+  --accent:#5CC9A2; --accent-ink:#0A1913; --accent-soft:#1D3A2F; --sun:#F2BD4B; --sun-soft:#3A301A;
+  --timer:#F07A62; --timer-soft:#3E231D; --danger:#E6826A;
+  --shadow:0 1px 2px rgb(0 0 0 / .3), 0 6px 20px rgb(0 0 0 / .25); color-scheme:dark }
+
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font:400 16px/1.45 var(--f-ui);-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+button,input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3{margin:0;text-wrap:balance;font-weight:600;letter-spacing:-.01em}
+h1{font-size:1.75rem;line-height:1.15}
+h2{font-size:1.05rem}
+h3{font-size:1rem}
+p{margin:0}
+.num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.small{font-size:.85rem}
+.eyebrow{font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:500}
+:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 60%,transparent);outline-offset:2px;border-radius:8px}
+
+/* ---------- App-Rahmen ---------- */
+.app{display:grid;grid-template-columns:1fr;min-height:100%}
+.rail{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;justify-content:space-around;gap:2px;
+  background:var(--surface);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px))}
+.rail .brand{display:none}
+.rail a{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0 4px;border-radius:12px;
+  font-size:.68rem;color:var(--muted);text-decoration:none;font-weight:500}
+.rail a svg{width:24px;height:24px}
+.rail a[aria-current="page"]{color:var(--accent)}
+.rail a[aria-current="page"] svg{stroke-width:2.2}
+.rail .badge{font-family:var(--f-num);font-size:.62rem;background:var(--accent);color:var(--accent-ink);border-radius:99px;padding:0 5px;margin-left:2px}
+main{width:100%;max-width:1120px;margin:0 auto;padding-inline:16px;padding-block:12px calc(100px + env(safe-area-inset-bottom,0px))}
+.top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.top .title{font-weight:600;font-size:1.05rem;margin-right:auto}
+.whobar{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;max-width:100%;padding:2px}
+.whobar::-webkit-scrollbar{display:none}
+.syncpill{display:inline-flex;align-items:center;gap:6px;font-size:.75rem;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:99px;padding:4px 10px;white-space:nowrap}
+.syncpill i{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.syncpill.cloud i{background:var(--accent)}
+.syncpill.ro i{background:var(--sun)}
+@media (min-width:900px){
+  .app{grid-template-columns:232px minmax(0,1fr)}
+  .rail{position:sticky;top:0;height:100vh;flex-direction:column;justify-content:flex-start;gap:4px;border-top:0;border-right:1px solid var(--line);padding:24px 14px}
+  .rail .brand{display:block;font-weight:700;font-size:1.15rem;padding:0 12px 18px;letter-spacing:-.02em}
+  .rail .brand span{display:block;font-weight:400;font-size:.78rem;color:var(--muted);letter-spacing:0}
+  .rail a{flex:0 0 auto;flex-direction:row;gap:12px;font-size:.98rem;padding:10px 12px}
+  .rail a[aria-current="page"]{background:var(--accent-soft)}
+  main{padding-inline:36px;padding-block:28px 48px}
+  .top .title{display:none}
+}
+
+/* ---------- Bausteine ---------- */
+.card{background:var(--surface);border-radius:var(--r);box-shadow:var(--shadow);padding:18px}
+.block{display:flex;flex-direction:column;gap:10px}
+.block > header{display:flex;align-items:baseline;gap:10px}
+.block > header h2{margin-right:auto}
+.stack{display:flex;flex-direction:column;gap:18px}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
+@media (min-width:760px){ .grid2{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);align-items:start} }
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.spacer{flex:1}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 16px;border-radius:12px;border:1px solid var(--line);
+  background:var(--surface);color:var(--ink);cursor:pointer;font-weight:500;text-decoration:none;white-space:nowrap}
+.btn:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--accent)}
+.btn.danger{color:var(--danger)}
+.btn.danger.armed{background:var(--danger);border-color:var(--danger);color:var(--surface)}
+.btn.sm{min-height:34px;padding:0 12px;font-size:.88rem;border-radius:10px}
+.btn.big{min-height:64px;font-size:1.2rem;padding:0 28px;border-radius:18px}
+.btn svg{width:18px;height:18px}
+.iconbtn{display:inline-grid;place-items:center;width:40px;height:40px;border-radius:12px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.iconbtn:hover{background:var(--surface-2);color:var(--ink)}
+.iconbtn svg{width:20px;height:20px}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+.chip{position:relative;display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:99px;border:1px solid var(--line);background:var(--surface);
+  cursor:pointer;white-space:nowrap;font-size:.88rem;user-select:none}
+.chip[aria-pressed="true"],.chip:has(input:checked){background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.chip input{position:absolute;opacity:0;pointer-events:none}
+.who{display:inline-flex;align-items:center;gap:5px;font-size:.78rem;font-weight:500;padding:2px 8px 2px 6px;border-radius:99px;
+  background:color-mix(in srgb,var(--pc,#888) 16%,var(--surface));color:var(--ink);white-space:nowrap}
+.who::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--pc,#888)}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--pc,var(--muted));flex:none}
+
+input[type=text],input[type=time],input[type=date],input[type=number],select,textarea,input:not([type]){
+  width:100%;min-height:44px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+textarea{min-height:84px;resize:vertical}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+label.f{display:flex;flex-direction:column;gap:6px;font-size:.85rem;color:var(--muted);font-weight:500;min-width:0}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+.quick{display:flex;gap:8px}
+.quick input{flex:1;min-width:0}
+
+/* Aufgaben-Zeilen */
+.list{display:flex;flex-direction:column}
+.item{display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:1px solid var(--line);min-width:0}
+.item:last-child{border-bottom:0}
+.item .body{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;cursor:pointer}
+.item .t{overflow-wrap:anywhere}
+.item .meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:.78rem;color:var(--muted)}
+.item.done .t{text-decoration:line-through;color:var(--muted)}
+.check{flex:none;width:30px;height:30px;border-radius:50%;border:2px solid color-mix(in srgb,var(--accent) 55%,var(--line));background:transparent;cursor:pointer;display:grid;place-items:center;color:var(--accent-ink)}
+.check:hover{background:var(--accent-soft)}
+.check.on{background:var(--accent);border-color:var(--accent)}
+.check svg{width:16px;height:16px}
+.tag{font-size:.72rem;padding:1px 7px;border-radius:6px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
+.tag.warm{background:var(--sun-soft);color:var(--ink)}
+.more{align-self:flex-start}
+.empty{padding:18px;border:1.5px dashed var(--line);border-radius:var(--r);color:var(--muted);text-align:left;display:flex;flex-direction:column;gap:6px}
+
+/* Tabs */
+.tabs{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:2px}
+.tabs::-webkit-scrollbar{display:none}
+
+/* ---------- Heute ---------- */
+.dayhead{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.dayhead .clock{font-family:var(--f-num);font-size:2.4rem;line-height:1;font-weight:600;letter-spacing:-.02em;margin-left:auto}
+.now{display:grid;grid-template-columns:auto minmax(0,1fr);gap:18px;align-items:center;background:var(--surface);border-radius:22px;padding:20px;box-shadow:var(--shadow);border:2px solid var(--accent-soft)}
+.now.urgent{border-color:var(--timer)}
+.now .lbl{font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;color:var(--accent);font-weight:600}
+.now.urgent .lbl{color:var(--timer)}
+.now .big{font-size:1.5rem;font-weight:600;line-height:1.2;overflow-wrap:anywhere}
+.now .sub{color:var(--muted);margin-top:4px}
+.now .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.now .emo{font-size:3.2rem;line-height:1;width:96px;text-align:center}
+.tt{width:96px;height:96px;display:block}
+.tt-face{fill:var(--surface-2)}
+.tt-fill{fill:var(--timer)}
+.tt-tick{stroke:var(--muted);stroke-width:1.2}
+.tt-hub{fill:var(--ink)}
+.timeline{display:flex;flex-direction:column}
+.tl{display:grid;grid-template-columns:62px 10px minmax(0,1fr);gap:12px;align-items:start;padding:8px 0;cursor:pointer}
+.tl .tm{font-family:var(--f-num);font-size:.92rem;text-align:right;padding-top:1px}
+.tl .tm small{display:block;color:var(--muted);font-size:.75rem}
+.tl .dot{margin-top:6px}
+.tl.past{opacity:.5}
+.tl .go{font-size:.78rem;color:var(--timer);font-weight:500}
+.routchips{display:flex;gap:8px;flex-wrap:wrap}
+.rchip{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:14px;background:var(--surface);border:1px solid var(--line);cursor:pointer;min-width:0}
+.rchip .e{font-size:1.5rem}
+.rchip .p{font-family:var(--f-num);font-size:.8rem;color:var(--muted)}
+.rchip.fin{background:var(--accent-soft);border-color:transparent}
+.bar{height:6px;border-radius:9px;background:var(--surface-2);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:9px}
+.stat{display:flex;gap:18px;flex-wrap:wrap}
+.stat b{font-family:var(--f-num);font-size:1.6rem;display:block;line-height:1.1}
+
+/* ---------- Kalender ---------- */
+.weeknav{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.weeknav .lab{font-weight:600}
+.days{display:flex;flex-direction:column;gap:10px}
+.day{display:grid;grid-template-columns:58px minmax(0,1fr);gap:14px;padding:14px;border-radius:var(--r);background:var(--surface)}
+.day.today{box-shadow:inset 0 0 0 2px var(--accent)}
+.day .d{display:flex;flex-direction:column;align-items:center;line-height:1.1}
+.day .d b{font-family:var(--f-num);font-size:1.6rem}
+.day .d span{font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.day .evs{display:flex;flex-direction:column;gap:6px;min-width:0}
+.ev{display:flex;gap:10px;align-items:baseline;padding:6px 10px;border-radius:10px;background:color-mix(in srgb,var(--pc,var(--muted)) 12%,var(--surface));cursor:pointer;min-width:0}
+.ev .tm{font-family:var(--f-num);font-size:.82rem;flex:none;color:var(--muted)}
+.ev .x{min-width:0;overflow-wrap:anywhere}
+.day .add{align-self:flex-start}
+
+/* ---------- Routinen ---------- */
+.rgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+.rcard{display:flex;flex-direction:column;gap:10px}
+.rcard .hd{display:flex;align-items:center;gap:12px}
+.rcard .hd .e{font-size:2rem}
+.steps-mini{display:flex;gap:4px;flex-wrap:wrap;font-size:1.2rem}
+.stepedit{display:grid;grid-template-columns:44px minmax(0,1fr) 52px auto;gap:6px;align-items:center}
+.stepedit input{min-height:40px;padding:8px 6px}
+.stepedit .emo{text-align:center;font-size:1.2rem}
+.stepedit .ctl{display:flex}
+.stepedit .ctl .iconbtn{width:28px;height:34px}
+@media (min-width:700px){ .stepedit{grid-template-columns:56px minmax(0,1fr) 72px auto} .stepedit .ctl .iconbtn{width:34px} }
+
+/* ---------- Essen & Einkauf ---------- */
+.meals{display:flex;flex-direction:column}
+.meal{display:grid;grid-template-columns:70px minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+.meal:last-child{border-bottom:0}
+.meal .dn{font-weight:600}
+.meal .dn small{display:block;font-weight:400;color:var(--muted);font-size:.75rem}
+.meal.today .dn{color:var(--accent)}
+.shop{display:flex;flex-wrap:wrap;gap:8px}
+.sitem{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 14px;border-radius:12px;background:var(--surface);border:1px solid var(--line);cursor:pointer;max-width:100%}
+.sitem span{overflow-wrap:anywhere}
+.sitem.done{background:transparent;border-style:dashed;color:var(--muted)}
+
+/* ---------- Sheet (Dialog) ---------- */
+.scrim{position:fixed;inset:0;background:rgb(10 16 14 / .45);z-index:60;animation:fade .15s ease}
+.sheet{position:fixed;z-index:61;left:0;right:0;bottom:0;max-height:92%;overflow:auto;background:var(--bg);border-radius:22px 22px 0 0;
+  padding:18px 16px calc(20px + env(safe-area-inset-bottom,0px));box-shadow:0 -10px 40px rgb(0 0 0 / .2);animation:up .2s ease}
+.sheet > header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.sheet > header h2{margin-right:auto;font-size:1.2rem}
+.sheet form{display:flex;flex-direction:column;gap:14px}
+.sheet .foot{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+@media (min-width:700px){ .sheet{left:50%;right:auto;bottom:auto;top:50%;transform:translate(-50%,-50%);width:min(620px,calc(100% - 48px));border-radius:22px;animation:fade .15s ease} }
+@keyframes up{from{transform:translateY(30px);opacity:.6}}
+@keyframes fade{from{opacity:0}}
+
+/* ---------- Vollbild-Overlays: Routine, Fokus, Kinder-Ansicht ---------- */
+.ov{position:fixed;inset:0;z-index:50;background:var(--bg);overflow:auto;display:flex;flex-direction:column;
+  padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(20px + env(safe-area-inset-bottom,0px))}
+.ov .ovtop{display:flex;align-items:center;gap:10px}
+.ov .ovtop .name{font-weight:600;margin-right:auto}
+.player{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;text-align:center;max-width:640px;margin:0 auto;width:100%}
+.player .stepemo{font-size:clamp(5rem,22vw,9rem);line-height:1}
+.player .steptxt{font-size:clamp(1.6rem,6vw,2.4rem);font-weight:600;line-height:1.15;overflow-wrap:anywhere}
+.player .tt{width:min(46vw,200px);height:min(46vw,200px)}
+.player .left{font-family:var(--f-num);font-size:1.3rem}
+.player .left.over{color:var(--timer)}
+.player .nextup{color:var(--muted)}
+.pdots{display:flex;gap:6px;justify-content:center;flex-wrap:wrap}
+.pdots i{width:12px;height:12px;border-radius:50%;background:var(--surface-2)}
+.pdots i.on{background:var(--accent)}
+.pdots i.cur{background:var(--sun);transform:scale(1.25)}
+.celebrate .stars{font-size:clamp(3rem,14vw,5rem);color:var(--sun)}
+.kid{max-width:900px;margin:0 auto;width:100%;display:flex;flex-direction:column;gap:22px;padding-top:8px}
+.kidhead{display:flex;align-items:center;gap:14px}
+.kidhead .e{font-size:3.4rem}
+.kidhead h1{font-size:2rem}
+.jar{display:flex;flex-wrap:wrap;gap:6px;font-size:2rem;line-height:1}
+.jar .off{opacity:.18;filter:grayscale(1)}
+.ktiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px}
+.ktile{display:flex;flex-direction:column;align-items:center;gap:10px;padding:24px 16px;border-radius:26px;background:var(--surface);box-shadow:var(--shadow);border:0;cursor:pointer;text-align:center}
+.ktile .e{font-size:4.5rem;line-height:1}
+.ktile b{font-size:1.4rem}
+.ktile.fin{background:var(--accent-soft)}
+.kev{display:flex;gap:14px;align-items:center;font-size:1.25rem;padding:10px 14px;background:var(--surface);border-radius:16px}
+.kev .tm{font-family:var(--f-num);font-weight:600}
+.hold{position:relative;overflow:hidden;touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.hold::after{content:"";position:absolute;left:0;bottom:0;height:3px;width:0;background:var(--accent)}
+.hold.holding::after{width:100%;transition:width 1.5s linear}
+
+.toast{position:fixed;z-index:80;left:50%;transform:translateX(-50%);bottom:calc(92px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);
+  border-radius:14px;padding:10px 12px 10px 16px;display:flex;gap:12px;align-items:center;box-shadow:0 8px 30px rgb(0 0 0 / .25);max-width:calc(100% - 32px);animation:up .2s ease}
+.toast button{background:transparent;border:0;color:var(--accent-soft);font-weight:600;cursor:pointer;padding:6px}
+@media (min-width:900px){ .toast{bottom:28px} }
+canvas.confetti{position:fixed;inset:0;pointer-events:none;z-index:90;width:100%;height:100%}
+@media (prefers-reduced-motion: reduce){ *{animation:none!important;transition:none!important} }
+</style>
+
+<div class="app">
+  <nav class="rail" id="rail" aria-label="Bereiche"></nav>
+  <main id="main" aria-live="polite"></main>
+</div>
+<div id="sheetRoot"></div>
+<div id="ovRoot"></div>
+<div id="toastRoot"></div>
+<input type="file" id="fileIcs" accept=".ics,text/calendar" hidden>
+<input type="file" id="fileJson" accept=".json,application/json" hidden>
+
+<script>
+"use strict";
+/* ================================================================
+   Familienkompass – Familien-Organisation für ADHS-Alltag
+   Speicher: claude.ai-Datenbank (Live-Sync zwischen Geräten) oder,
+   ausserhalb von claude.ai, lokal im Browser.
+   ================================================================ */
+
+// ---------- Hilfsfunktionen ----------
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const clone = o => JSON.parse(JSON.stringify(o ?? null));
+const pad = n => String(n).padStart(2, "0");
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const parseYmd = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+const addDays = (s, n) => { const d = parseYmd(s); d.setDate(d.getDate() + n); return ymd(d); };
+const today = () => ymd(new Date());
+const nowMin = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
+const toMin = t => { if (!t) return null; const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+const fromMin = m => `${pad(Math.floor(m / 60) % 24)}:${pad(((m % 60) + 60) % 60)}`;
+const fmtDay = (s, o) => parseYmd(s).toLocaleDateString("de-DE", o || { weekday: "long", day: "numeric", month: "long" });
+const mondayOf = s => { const d = parseYmd(s); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return ymd(d); };
+const dayDiff = (a, b) => Math.round((parseYmd(b) - parseYmd(a)) / 864e5);
+function isoWeek(s) { const d = parseYmd(s); d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7)); const w1 = new Date(d.getFullYear(), 0, 4); return 1 + Math.round(((d - w1) / 864e5 - 3 + ((w1.getDay() + 6) % 7)) / 7); }
+function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch { } }
+const WD = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+
+const ICON = {
+  heute: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  aufgaben: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M3.5 6l1.5 1.5L7.5 5M3.5 12l1.5 1.5L7.5 11M3.5 18l1.5 1.5L7.5 17"/>',
+  routinen: '<path d="M17 2l3 3-3 3"/><path d="M3 11V9a4 4 0 0 1 4-4h13"/><path d="M7 22l-3-3 3-3"/><path d="M21 13v2a4 4 0 0 1-4 4H4"/>',
+  kalender: '<rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/>',
+  essen: '<path d="M3 5h2l2.2 10.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 1.9-1.5L21 8H6"/><circle cx="10" cy="20.5" r="1.2"/><circle cx="17" cy="20.5" r="1.2"/>',
+  familie: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17.5" cy="10" r="2.4"/><path d="M16 14.3c3 .2 5 2.5 5 5.7"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>', x: '<path d="M6 6l12 12M18 6L6 18"/>', check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  left: '<path d="M15 5l-7 7 7 7"/>', right: '<path d="M9 5l7 7-7 7"/>', play: '<path d="M7 4.5v15l12-7.5z"/>',
+  up: '<path d="M6 15l6-6 6 6"/>', down: '<path d="M6 9l6 6 6-6"/>', trash: '<path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>', focus: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/>', download: '<path d="M12 4v12M7 11l5 5 5-5M4 16v4h16v-4"/>'
+};
+const ico = (n, c = "i") => `<svg class="${c}" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]}</svg>`;
+
+// ---------- Datenspeicher ----------
+const COLS = ["members", "tasks", "events", "routines", "runs", "shopping", "meals", "settings"];
+const S = {}; COLS.forEach(c => (S[c] = {}));
+const sync = { mode: "connecting", readOnly: false, ready: false };
+let db = null;
+const LS_KEY = "familienkompass-v1";
+
+function loadLocal() {
+  const raw = lsGet(LS_KEY); if (!raw) return;
+  try { const o = JSON.parse(raw); COLS.forEach(c => { if (o && o[c] && typeof o[c] === "object") S[c] = o[c]; }); } catch { }
+}
+let saveT;
+function saveLocal() { clearTimeout(saveT); saveT = setTimeout(() => lsSet(LS_KEY, JSON.stringify(S)), 250); }
+
+const all = col => Object.entries(S[col]).map(([id, v]) => ({ ...v, id }));
+function put(col, id, obj) {
+  if (sync.readOnly) { toast("Du kannst hier nur lesen. Der Besitzer muss dich als Bearbeiter:in einladen."); return; }
+  const data = clone(obj); delete data.id;
+  S[col][id] = data; saveLocal();
+  if (sync.mode === "cloud") cloudWrite(col + "/" + id, data);
+  schedule();
+}
+function patch(col, id, p) { const cur = S[col][id]; if (cur) put(col, id, { ...clone(cur), ...p }); }
+function del(col, id) {
+  if (sync.readOnly) { toast("Du kannst hier nur lesen."); return; }
+  delete S[col][id]; saveLocal();
+  if (sync.mode === "cloud") cloudWrite(col + "/" + id, null);
+  schedule();
+}
+
+// Pro Dokument immer nur ein Schreibvorgang gleichzeitig; neuere Stände ersetzen wartende.
+const wq = {};
+function cloudWrite(path, data) {
+  const q = wq[path] || (wq[path] = { busy: false, next: null });
+  q.next = { data };
+  if (!q.busy) pump(path);
+}
+async function pump(path) {
+  const q = wq[path]; q.busy = true;
+  while (q.next) {
+    const { data } = q.next; q.next = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { const ref = db.doc(path); if (data === null) await ref.delete(); else await ref.set(data); break; }
+      catch (e) {
+        const code = e && e.code;
+        if (code === "unavailable" && attempt === 0) { await new Promise(r => setTimeout(r, 600 + Math.random() * 900)); continue; }
+        if (code === "invalid_argument") { sync.readOnly = true; renderChrome(); toast("Speichern nicht erlaubt – du hast hier nur Leserechte."); }
+        else if (code === "quota_exceeded") toast("Der Speicher ist voll. Bitte alte Einträge löschen.");
+        else toast("Speichern hat nicht geklappt. Prüfe die Verbindung.");
+        break;
+      }
+    }
+  }
+  q.busy = false;
+}
+
+async function initCloud() {
+  const c = window.claude;
+  if (!c || typeof c.use !== "function") { sync.mode = "local"; onReady(); return; }
+  let d = null;
+  try { d = await c.use("db"); } catch { d = null; }
+  if (!d) { sync.mode = "local"; onReady(); return; }
+  db = d; sync.mode = "cloud"; renderChrome();
+  try { const u = await c.use("user"); if (u && typeof u.can === "function") { const w = await u.can("data.write"); if (w === false) sync.readOnly = true; } } catch { }
+  const loaded = new Set();
+  COLS.forEach(col => {
+    db.collection(col).onSnapshot(snap => {
+      const m = {}; snap.docs.forEach(doc => { if (doc.exists) m[doc.id] = doc.data(); });
+      S[col] = m; loaded.add(col); saveLocal();
+      if (!sync.ready && loaded.size === COLS.length) onReady(); else schedule();
+    }, err => {
+      if (err && err.code === "revoked") { sync.mode = "local"; sync.readOnly = true; renderChrome(); }
+      else toast("Sync unterbrochen – Seite neu laden hilft.");
+    });
+  });
+}
+
+function onReady() {
+  sync.ready = true;
+  if (!sync.readOnly) housekeeping();
+  schedule();
+}
+// Alte Routinen-Durchläufe (>14 Tage) und alte erledigte Aufgaben (>30 Tage) aufräumen.
+function housekeeping() {
+  const t = today();
+  all("runs").forEach(r => { if (r.date && dayDiff(r.date, t) > 14) del("runs", r.id); });
+  all("tasks").forEach(k => { if (k.done && k.doneAt && dayDiff(k.doneAt.slice(0, 10), t) > 30) del("tasks", k.id); });
+  all("shopping").forEach(s => { if (s.done && s.doneAt && dayDiff(s.doneAt.slice(0, 10), t) > 21) del("shopping", s.id); });
+}
+
+// ---------- UI-Zustand (pro Gerät) ----------
+const ui = {
+  view: "heute", who: lsGet("fk-who") || "all", taskTab: "heute", weekStart: mondayOf(today()), mealWeek: mondayOf(today()), showMore: false
+};
+const VIEWS = [["heute", "Heute"], ["aufgaben", "Aufgaben"], ["routinen", "Routinen"], ["kalender", "Kalender"], ["essen", "Essen"], ["familie", "Familie"]];
+function readHash() { const h = (location.hash || "").slice(1); if (VIEWS.some(v => v[0] === h)) ui.view = h; }
+
+// ---------- Abfragen ----------
+const members = () => all("members").sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name));
+const member = id => (id && S.members[id]) ? { ...S.members[id], id } : null;
+const settings = () => ({ topN: 3, ...(S.settings.main || {}) });
+const whoOk = w => ui.who === "all" || !w || (Array.isArray(w) ? (w.length === 0 || w.includes(ui.who)) : w === ui.who);
+function whoChip(id) { const m = member(id); return m ? `<span class="who" style="--pc:${esc(m.color)}">${esc(m.emoji || "")} ${esc(m.name)}</span>` : ""; }
+function evColor(e) { const m = member((e.who || [])[0]); return m ? m.color : "var(--muted)"; }
+
+function occursOn(e, d) {
+  if (!e.date || d < e.date) return false;
+  if (!e.repeat || e.repeat === "none") return d === e.date || (!!e.endDate && d <= e.endDate);
+  if (e.until && d > e.until) return false;
+  const iv = Math.max(1, e.interval || 1), diff = dayDiff(e.date, d);
+  switch (e.repeat) {
+    case "daily": return diff % iv === 0;
+    case "weekly": {
+      const wd = parseYmd(d).getDay(); const days = (e.days && e.days.length) ? e.days : [parseYmd(e.date).getDay()];
+      if (!days.includes(wd)) return false;
+      return Math.floor((diff + ((parseYmd(e.date).getDay() + 6) % 7)) / 7) % iv === 0;
+    }
+    case "monthly": { const a = parseYmd(e.date), b = parseYmd(d); const mm = (b.getFullYear() - a.getFullYear()) * 12 + b.getMonth() - a.getMonth(); return b.getDate() === a.getDate() && mm % iv === 0; }
+    case "yearly": return d.slice(5) === e.date.slice(5);
+  }
+  return false;
+}
+function eventsOn(d) {
+  return all("events").filter(e => occursOn(e, d) && whoOk(e.who))
+    .sort((a, b) => (a.start ? toMin(a.start) : -1) - (b.start ? toMin(b.start) : -1));
+}
+const routines = () => all("routines").sort((a, b) => (toMin(a.start) ?? 9999) - (toMin(b.start) ?? 9999) || a.name.localeCompare(b.name));
+const runOf = (rid, d = today()) => S.runs[rid + "_" + d] || null;
+function todayTasks() {
+  const t = today();
+  return all("tasks").filter(k => !k.done && k.list !== "inbox" && (k.list === "heute" || (k.due && k.due <= t)) && whoOk(k.who))
+    .sort((a, b) => (a.due || "9") < (b.due || "9") ? -1 : (a.due || "9") > (b.due || "9") ? 1 : (a.created || "").localeCompare(b.created || ""));
+}
+
+// ---------- Zeit-Timer (Time-Timer-Scheibe gegen Zeitblindheit) ----------
+function timerSVG(frac) {
+  frac = Math.max(0, Math.min(1, frac || 0));
+  let wedge = "";
+  if (frac >= .999) wedge = '<circle cx="50" cy="50" r="44" class="tt-fill"/>';
+  else if (frac > 0) {
+    const a = frac * 2 * Math.PI, x = 50 + 44 * Math.sin(a), y = 50 - 44 * Math.cos(a);
+    wedge = `<path class="tt-fill" d="M50 50 L50 6 A44 44 0 ${frac > .5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)} Z"/>`;
+  }
+  let ticks = "";
+  for (let i = 0; i < 12; i++) { const a = i / 12 * 2 * Math.PI, r1 = i % 3 ? 45 : 42; ticks += `<line class="tt-tick" x1="${(50 + r1 * Math.sin(a)).toFixed(1)}" y1="${(50 - r1 * Math.cos(a)).toFixed(1)}" x2="${(50 + 48 * Math.sin(a)).toFixed(1)}" y2="${(50 - 48 * Math.cos(a)).toFixed(1)}"/>`; }
+  return `<svg viewBox="0 0 100 100" class="tt" aria-hidden="true"><circle cx="50" cy="50" r="48" class="tt-face"/>${wedge}${ticks}<circle cx="50" cy="50" r="3.5" class="tt-hub"/></svg>`;
+}
+const minTxt = m => m >= 60 ? `${Math.floor(m / 60)} Std ${m % 60 ? (m % 60) + " Min" : ""}`.trim() : `${m} Min`;
+
+// ---------- Rendering ----------
+let rq = false;
+function schedule() { if (rq) return; rq = true; requestAnimationFrame(() => { rq = false; render(); }); }
+
+function renderChrome() {
+  const inbox = all("tasks").filter(k => !k.done && k.list === "inbox").length;
+  $("#rail").innerHTML = `<div class="brand">Familienkompass<span>${esc(settings().family || "Unsere Familie")}</span></div>` +
+    VIEWS.map(([k, l]) => `<a href="#${k}" ${ui.view === k ? 'aria-current="page"' : ""}>${ico(k)}<span>${l}${k === "aufgaben" && inbox ? `<span class="badge">${inbox}</span>` : ""}</span></a>`).join("");
+}
+function syncPill() {
+  if (sync.mode === "cloud") return sync.readOnly ? `<span class="syncpill ro"><i></i>Nur lesen</span>` : `<span class="syncpill cloud" title="Änderungen erscheinen sofort auf allen Geräten"><i></i>Synchron</span>`;
+  if (sync.mode === "connecting") return `<span class="syncpill"><i></i>Verbinde …</span>`;
+  return `<span class="syncpill" title="Daten liegen nur in diesem Browser"><i></i>Nur dieses Gerät</span>`;
+}
+function topBar(title) {
+  const ms = members();
+  const chips = ms.length ? `<div class="whobar" role="group" aria-label="Person filtern">
+      <button class="chip" data-act="who" data-id="all" aria-pressed="${ui.who === "all"}">Alle</button>
+      ${ms.map(m => `<button class="chip" data-act="who" data-id="${m.id}" aria-pressed="${ui.who === m.id}">${esc(m.emoji || "")} ${esc(m.name)}</button>`).join("")}
+    </div>` : "";
+  return `<div class="top"><span class="title">${esc(title)}</span>${chips}${syncPill()}</div>`;
+}
+
+function render() {
+  if (ui.who !== "all" && !S.members[ui.who]) ui.who = "all";
+  renderChrome();
+  const main = $("#main");
+  // Eingaben erhalten, falls während des Tippens neue Daten eintreffen
+  const keep = {}; main.querySelectorAll("input[id],textarea[id]").forEach(el => (keep[el.id] = el.value));
+  const act = document.activeElement && main.contains(document.activeElement) ? document.activeElement.id : null;
+  const selS = act && document.activeElement.selectionStart;
+  const V = { heute: viewHeute, aufgaben: viewAufgaben, routinen: viewRoutinen, kalender: viewKalender, essen: viewEssen, familie: viewFamilie }[ui.view] || viewHeute;
+  main.innerHTML = V();
+  Object.entries(keep).forEach(([id, v]) => { const el = document.getElementById(id); if (el && main.contains(el) && el.type !== "file") el.value = v; });
+  if (act) { const el = document.getElementById(act); if (el) { el.focus(); try { if (selS != null) el.setSelectionRange(selS, selS); } catch { } } }
+  if (ov && ov.type === "kid") renderOverlay();
+}
+
+// ---------- Ansicht: Heute ----------
+function greeting() { const h = new Date().getHours(); return h < 11 ? "Guten Morgen" : h < 17 ? "Hallo" : "Guten Abend"; }
+
+function nowCard() {
+  const t = today(), nm = nowMin();
+  // 1. Angefangene Routine
+  for (const r of routines()) { const run = runOf(r.id); if (whoOk(r.who) && run && !run.finished && (run.done || []).length) return { kind: "routine", r, run }; }
+  // 2. Termin, zu dem man bald los muss
+  const evs = eventsOn(t).filter(e => e.start);
+  let soon = null, running = null;
+  for (const e of evs) {
+    const st = toMin(e.start), go = st - (e.lead || 0), en = e.end ? toMin(e.end) : st + 60;
+    if (nm < st && go - nm <= 180 && (!soon || go < soon.go)) soon = { e, go, st, inMin: go - nm };
+    if (nm >= st && nm < en && !running) running = { e, left: en - nm };
+  }
+  if (soon && soon.inMin <= 90) return { kind: "event", ...soon };
+  // 3. Routine, die jetzt dran ist
+  for (const r of routines()) {
+    if (!whoOk(r.who) || !r.start) continue; const st = toMin(r.start), run = runOf(r.id);
+    if (!(run && run.finished) && nm >= st - 30 && nm <= st + 45) return { kind: "routineDue", r };
+  }
+  if (running) return { kind: "running", ...running };
+  if (soon) return { kind: "event", ...soon };
+  const tk = todayTasks()[0];
+  if (tk) return { kind: "task", tk };
+  return { kind: "calm" };
+}
+
+function viewNow() {
+  const n = nowCard();
+  if (n.kind === "routine" || n.kind === "routineDue") {
+    const r = n.r, steps = r.steps || [], done = n.run ? (n.run.done || []).length : 0;
+    return `<article class="now"><div class="emo">${esc(r.emoji || "🔁")}</div><div>
+      <div class="lbl">Jetzt dran</div><div class="big">${esc(r.name)}</div>
+      <div class="sub">${whoChip(r.who)} ${n.kind === "routine" ? `${done} von ${steps.length} Schritten geschafft` : `geplant um ${esc(r.start)} · ${steps.length} Schritte`}</div>
+      <div class="acts"><button class="btn primary" data-act="startRoutine" data-id="${r.id}">${ico("play")} ${n.kind === "routine" ? "Weitermachen" : "Starten"}</button></div></div></article>`;
+  }
+  if (n.kind === "event") {
+    const e = n.e, urgent = n.inMin <= 15;
+    const head = n.inMin <= 0 ? "Jetzt losgehen!" : `in ${minTxt(n.inMin)}`;
+    return `<article class="now ${urgent ? "urgent" : ""}">${timerSVG(Math.min(Math.max(n.inMin, 0), 60) / 60)}<div>
+      <div class="lbl">${e.lead ? "Losgehen" : "Nächster Termin"}</div><div class="big num">${head}</div>
+      <div class="sub">${esc(e.title)} · ${e.lead ? `los um <b class="num">${fromMin(n.go)}</b>, Termin ` : ""}<span class="num">${esc(e.start)}</span></div>
+      <div class="acts">${(e.who || []).map(whoChip).join(" ")}</div></div></article>`;
+  }
+  if (n.kind === "running") {
+    return `<article class="now"><div class="emo">⏳</div><div><div class="lbl">Läuft gerade</div><div class="big">${esc(n.e.title)}</div>
+      <div class="sub">noch ${minTxt(n.left)} · bis <span class="num">${esc(n.e.end || fromMin(toMin(n.e.start) + 60))}</span></div></div></article>`;
+  }
+  if (n.kind === "task") {
+    const k = n.tk;
+    return `<article class="now"><div class="emo">🎯</div><div><div class="lbl">Als Nächstes</div><div class="big">${esc(k.title)}</div>
+      <div class="sub">${k.minutes ? `ca. ${k.minutes} Min · ` : ""}Nur diese eine Sache. Der Rest wartet.</div>
+      <div class="acts"><button class="btn primary" data-act="focus" data-id="${k.id}">${ico("focus")} Fokus starten</button>
+      <button class="btn" data-act="toggleTask" data-id="${k.id}">${ico("check")} Erledigt</button></div></div></article>`;
+  }
+  return `<article class="now"><div class="emo">🌿</div><div><div class="lbl">Gerade nichts Dringendes</div><div class="big">Durchatmen.</div>
+    <div class="sub">Kein Termin in den nächsten Stunden, keine offene Aufgabe für heute.</div></div></article>`;
+}
+
+function taskRow(k, opts = {}) {
+  const t = today();
+  const late = k.due && k.due < t && !k.done;
+  const meta = [
+    k.who ? whoChip(k.who) : "",
+    late ? `<span class="tag warm">von ${dayDiff(k.due, t) === 1 ? "gestern" : fmtDay(k.due, { weekday: "short", day: "numeric", month: "numeric" })}</span>` : "",
+    !late && k.due && k.due !== t && opts.showDue ? `<span class="tag">${fmtDay(k.due, { weekday: "short", day: "numeric", month: "numeric" })}</span>` : "",
+    k.minutes ? `<span class="tag num">~${k.minutes} Min</span>` : "",
+    k.repeat && k.repeat !== "none" ? `<span class="tag">${k.repeat === "daily" ? "täglich" : "wöchentlich"}</span>` : ""
+  ].join("");
+  const sortBtns = opts.inbox ? `<div class="row" style="gap:4px">
+      <button class="btn sm" data-act="moveTask" data-id="${k.id}" data-to="heute">Heute</button>
+      <button class="btn sm" data-act="moveTask" data-id="${k.id}" data-to="bald">Bald</button>
+      <button class="btn sm ghost" data-act="moveTask" data-id="${k.id}" data-to="irgendwann">Irgendwann</button></div>` :
+    (!k.done && opts.focus ? `<button class="iconbtn" title="Fokus starten" data-act="focus" data-id="${k.id}">${ico("focus")}</button>` : "");
+  return `<div class="item ${k.done ? "done" : ""}">
+    <button class="check ${k.done ? "on" : ""}" data-act="toggleTask" data-id="${k.id}" aria-label="${k.done ? "Wieder öffnen" : "Erledigt"}">${k.done ? ico("check") : ""}</button>
+    <div class="body" data-act="editTask" data-id="${k.id}"><span class="t">${esc(k.title)}</span>${meta ? `<span class="meta">${meta}</span>` : ""}</div>
+    ${sortBtns}</div>`;
+}
+
+function onboarding() {
+  if (!sync.ready) return `<div class="empty"><b>Daten werden geladen …</b></div>`;
+  if (sync.readOnly) return `<div class="empty"><b>Noch keine Familie angelegt.</b><span>Du hast nur Leserechte. Bitte den Besitzer, dich als Bearbeiter:in einzuladen.</span></div>`;
+  return `<section class="card stack"><div><div class="eyebrow">Willkommen</div><h1>Wer gehört zur Familie?</h1>
+    <p class="muted" style="margin-top:6px">Namen kannst du später jederzeit ändern. Kinder bekommen eine eigene, bildhafte Ansicht mit Sternen.</p></div>
+    <form data-form="setup" class="stack">
+      ${[["👩", "Mama", false], ["👨", "Papa", false], ["🧒", "Kind", true]].map(([e, n, k], i) => `
+        <div class="row"><input type="text" id="su_e${i}" name="e${i}" value="${e}" style="width:64px;text-align:center" aria-label="Emoji">
+        <input type="text" id="su_n${i}" name="n${i}" value="${n}" style="flex:1;min-width:120px" aria-label="Name">
+        <label class="chip"><input type="checkbox" name="k${i}" ${k ? "checked" : ""}>Kind</label></div>`).join("")}
+      <label class="chip" style="align-self:flex-start"><input type="checkbox" name="tpl" checked>Routine-Vorlagen anlegen (Morgen, Abend, Aus dem Haus …)</label>
+      <div><button class="btn primary" type="submit">Los geht's</button></div>
+    </form></section>`;
+}
+
+function viewHeute() {
+  const t = today(), nm = nowMin();
+  if (!members().length) return topBar("Heute") + onboarding();
+  const set = settings();
+  const tt = todayTasks();
+  const shown = ui.showMore ? tt : tt.slice(0, set.topN);
+  const evs = eventsOn(t);
+  const rs = routines().filter(r => whoOk(r.who));
+  const doneToday = all("tasks").filter(k => k.done && (k.doneAt || "").startsWith(t) && whoOk(k.who)).length;
+  const routDone = rs.filter(r => (runOf(r.id) || {}).finished).length;
+  const inbox = all("tasks").filter(k => !k.done && k.list === "inbox").length;
+  const meal = S.meals[t];
+  const shopOpen = all("shopping").filter(s => !s.done).length;
+  return topBar("Heute") + `
+  <div class="stack">
+    <header class="dayhead"><div><div class="eyebrow">${esc(fmtDay(t))}</div><h1>${greeting()}${ui.who !== "all" && member(ui.who) ? ", " + esc(member(ui.who).name) : ""}</h1></div>
+      <div class="clock">${fromMin(nm)}</div></header>
+    ${viewNow()}
+    <div class="grid2">
+      <div class="stack">
+        <section class="block"><header><h2>Termine heute</h2><button class="btn sm ghost" data-act="newEvent" data-id="${t}">${ico("plus")} Termin</button></header>
+          ${evs.length ? `<div class="timeline card" style="padding:8px 14px">${evs.map(e => {
+            const st = toMin(e.start), en = e.end ? toMin(e.end) : (st != null ? st + 60 : null), past = st != null && en <= nm;
+            return `<div class="tl ${past ? "past" : ""}" data-act="editEvent" data-id="${e.id}">
+              <div class="tm">${e.start ? esc(e.start) : "ganzt."}${e.end ? `<small>${esc(e.end)}</small>` : ""}</div>
+              <span class="dot" style="--pc:${esc(evColor(e))}"></span>
+              <div><div>${esc(e.title)}</div>${e.lead && !past ? `<div class="go">los um ${fromMin(st - e.lead)} (${e.lead} Min Vorlauf)</div>` : ""}
+              <div class="row" style="gap:4px;margin-top:3px">${(e.who || []).map(whoChip).join("")}</div></div></div>`;
+          }).join("")}</div>` : `<div class="empty">Heute keine Termine.</div>`}
+        </section>
+        <section class="block"><header><h2>Routinen</h2><a class="btn sm ghost" href="#routinen">Alle</a></header>
+          ${rs.length ? `<div class="routchips">${rs.map(r => {
+            const run = runOf(r.id) || {}, n = (r.steps || []).length, d = (run.done || []).length;
+            return `<button class="rchip ${run.finished ? "fin" : ""}" data-act="startRoutine" data-id="${r.id}"><span class="e">${esc(r.emoji || "🔁")}</span>
+              <span style="text-align:left"><b>${esc(r.name)}</b><br><span class="p">${run.finished ? "fertig ✓" : `${d}/${n}`}${r.start ? " · " + esc(r.start) : ""}</span></span></button>`;
+          }).join("")}</div>` : `<div class="empty">Noch keine Routinen. <a href="#routinen">Routine anlegen</a></div>`}
+        </section>
+      </div>
+      <div class="stack">
+        <section class="block"><header><h2>Heute wichtig</h2><span class="muted small">höchstens ${set.topN} auf einmal</span></header>
+          <div class="card" style="padding:4px 14px">
+            ${shown.length ? `<div class="list">${shown.map(k => taskRow(k, { focus: true })).join("")}</div>` : `<div class="empty" style="border:0;padding:14px 0">Nichts für heute geplant. Aus dem Eingang etwas nach „Heute“ holen?</div>`}
+          </div>
+          ${tt.length > set.topN ? `<button class="btn sm ghost more" data-act="toggleMore">${ui.showMore ? "Weniger zeigen" : `${tt.length - set.topN} weitere anzeigen`}</button>` : ""}
+          <form data-form="dump" class="quick"><input type="text" id="dumpIn" placeholder="Kopf leeren: einfach reinschreiben …" autocomplete="off" aria-label="Neuer Gedanke"><button class="btn primary" type="submit" aria-label="Hinzufügen">${ico("plus")}</button></form>
+          ${inbox ? `<a class="btn sm ghost more" href="#aufgaben" data-act="tab" data-id="inbox">${inbox} unsortiert im Eingang →</a>` : ""}
+        </section>
+        <section class="card stat">
+          <div><b>${doneToday}</b><span class="muted small">Aufgaben geschafft</span></div>
+          <div><b>${routDone}</b><span class="muted small">Routinen fertig</span></div>
+          <div style="flex-basis:100%" class="muted small">${doneToday + routDone ? "Das zählt. Gut gemacht." : "Jede erledigte Kleinigkeit zählt hier."}</div>
+        </section>
+        <section class="block"><header><h2>Essen & Einkauf</h2><a class="btn sm ghost" href="#essen">Öffnen</a></header>
+          <div class="card row" style="justify-content:space-between">
+            <div><div class="eyebrow">Heute gibt's</div><div>${meal && meal.text ? esc(meal.text) : '<span class="muted">noch nicht geplant</span>'}</div></div>
+            <div style="text-align:right"><div class="eyebrow">Einkaufsliste</div><div class="num">${shopOpen} offen</div></div>
+          </div></section>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ---------- Ansicht: Aufgaben ----------
+function viewAufgaben() {
+  const ts = all("tasks").filter(k => whoOk(k.who));
+  const t = today();
+  const lists = {
+    inbox: ts.filter(k => !k.done && k.list === "inbox"),
+    heute: todayTasks(),
+    bald: ts.filter(k => !k.done && k.list === "bald" && !(k.due && k.due <= t)),
+    irgendwann: ts.filter(k => !k.done && k.list === "irgendwann" && !(k.due && k.due <= t)),
+    erledigt: ts.filter(k => k.done).sort((a, b) => (b.doneAt || "").localeCompare(a.doneAt || "")).slice(0, 40)
+  };
+  const labels = { inbox: "Eingang", heute: "Heute", bald: "Bald", irgendwann: "Irgendwann", erledigt: "Erledigt" };
+  const hint = {
+    inbox: "Alles, was dir durch den Kopf geht. Sortiere später in Ruhe – oder lösch es.",
+    heute: "Was heute dran ist, inklusive fälliger Aufgaben.",
+    bald: "Diese Woche oder demnächst.",
+    irgendwann: "Ideen und Nicht-Dringendes. Kein Druck.",
+    erledigt: "Die letzten 30 Tage."
+  };
+  const cur = lists[ui.taskTab] ? ui.taskTab : "heute";
+  const L = lists[cur];
+  return topBar("Aufgaben") + `<div class="stack">
+    <div class="row"><h1 style="margin-right:auto">Aufgaben</h1><button class="btn primary" data-act="newTask">${ico("plus")} Aufgabe</button></div>
+    <div class="tabs" role="tablist">${Object.keys(labels).map(k => `<button class="chip" role="tab" data-act="tab" data-id="${k}" aria-pressed="${cur === k}">${labels[k]}${k !== "erledigt" && lists[k].length ? ` <span class="num">${lists[k].length}</span>` : ""}</button>`).join("")}</div>
+    <p class="muted small">${hint[cur]}</p>
+    ${cur === "inbox" ? `<form data-form="dump" class="quick"><input type="text" id="dumpIn2" placeholder="Neuer Gedanke …" autocomplete="off" aria-label="Neuer Gedanke"><button class="btn primary" type="submit" aria-label="Hinzufügen">${ico("plus")}</button></form>` : ""}
+    <div class="card" style="padding:4px 14px">${L.length ? `<div class="list">${L.map(k => taskRow(k, { inbox: cur === "inbox", focus: cur !== "erledigt", showDue: true })).join("")}</div>`
+      : `<div class="empty" style="border:0;padding:16px 0">${cur === "inbox" ? "Eingang leer. Kopf frei." : "Hier ist gerade nichts."}</div>`}</div>
+  </div>`;
+}
+
+// ---------- Ansicht: Routinen ----------
+function viewRoutinen() {
+  const ms = members(), rs = routines().filter(r => whoOk(r.who));
+  const groups = ms.map(m => ({ m, rs: rs.filter(r => r.who === m.id) })).filter(g => g.rs.length);
+  const loose = rs.filter(r => !member(r.who));
+  if (loose.length) groups.push({ m: null, rs: loose });
+  const kids = ms.filter(m => m.kid);
+  return topBar("Routinen") + `<div class="stack">
+    <div class="row"><h1 style="margin-right:auto">Routinen</h1>
+      <button class="btn" data-act="templates">Aus Vorlage</button><button class="btn primary" data-act="newRoutine">${ico("plus")} Routine</button></div>
+    <p class="muted" style="max-width:62ch">Feste Abläufe Schritt für Schritt, jeder Schritt mit eigener Zeitscheibe. Nach dem letzten Schritt gibt es Sterne.</p>
+    ${kids.length ? `<div class="row">${kids.map(k => `<button class="btn" data-act="kidMode" data-id="${k.id}">${esc(k.emoji || "🧒")} Kinder-Ansicht für ${esc(k.name)}</button>`).join("")}</div>` : ""}
+    ${groups.length ? groups.map(g => `<section class="block"><header><h2>${g.m ? esc((g.m.emoji || "") + " " + g.m.name) : "Ohne Person"}</h2></header>
+      <div class="rgrid">${g.rs.map(r => {
+        const run = runOf(r.id) || {}, n = (r.steps || []).length, d = (run.done || []).length, mins = (r.steps || []).reduce((a, s) => a + (+s.minutes || 0), 0);
+        return `<article class="card rcard"><div class="hd"><span class="e">${esc(r.emoji || "🔁")}</span><div style="min-width:0;flex:1"><h3>${esc(r.name)}</h3>
+          <div class="muted small">${r.start ? esc(r.start) + " · " : ""}${n} Schritte${mins ? ` · ~${mins} Min` : ""}${r.stars ? ` · ${"⭐".repeat(Math.min(r.stars, 5))}` : ""}</div></div></div>
+          <div class="steps-mini" aria-hidden="true">${(r.steps || []).map(s => `<span>${esc(s.emoji || "•")}</span>`).join("")}</div>
+          <div class="bar"><i style="width:${n ? (run.finished ? 100 : d / n * 100) : 0}%"></i></div>
+          <div class="row"><button class="btn primary sm" data-act="startRoutine" data-id="${r.id}">${ico("play")} ${run.finished ? "Nochmal" : d ? "Weiter" : "Start"}</button>
+          <button class="btn sm ghost" data-act="editRoutine" data-id="${r.id}">${ico("edit")} Bearbeiten</button></div></article>`;
+      }).join("")}</div></section>`).join("") : `<div class="empty"><b>Noch keine Routinen.</b><span>Starte mit einer Vorlage – z. B. „Morgenroutine“ fürs Kind oder „Aus dem Haus“.</span></div>`}
+  </div>`;
+}
+
+// ---------- Ansicht: Kalender ----------
+function viewKalender() {
+  const ws = ui.weekStart, t = today();
+  const days = Array.from({ length: 7 }, (_, i) => addDays(ws, i));
+  const lab = `${fmtDay(ws, { day: "numeric", month: "short" })} – ${fmtDay(days[6], { day: "numeric", month: "short" })}`;
+  return topBar("Kalender") + `<div class="stack">
+    <div class="row"><h1 style="margin-right:auto">Kalender</h1>
+      <button class="btn" data-act="importIcs">${ico("upload")} Aus Apple Kalender</button>
+      <button class="btn primary" data-act="newEvent" data-id="${t}">${ico("plus")} Termin</button></div>
+    <div class="weeknav"><button class="iconbtn" data-act="week" data-id="-7" aria-label="Vorige Woche">${ico("left")}</button>
+      <span class="lab">KW <span class="num">${isoWeek(ws)}</span> · ${esc(lab)}</span>
+      <button class="iconbtn" data-act="week" data-id="7" aria-label="Nächste Woche">${ico("right")}</button>
+      ${ws !== mondayOf(t) ? `<button class="btn sm" data-act="week" data-id="0">Diese Woche</button>` : ""}</div>
+    <div class="days">${days.map(d => {
+      const evs = eventsOn(d);
+      return `<div class="day ${d === t ? "today" : ""}"><div class="d"><span>${WD[parseYmd(d).getDay()]}</span><b>${parseYmd(d).getDate()}</b></div>
+        <div class="evs">${evs.map(e => `<div class="ev" style="--pc:${esc(evColor(e))}" data-act="editEvent" data-id="${e.id}"><span class="tm">${e.start ? esc(e.start) : "ganzt."}</span><span class="x">${esc(e.title)}${(e.who || []).length ? " " + (e.who || []).map(w => { const m = member(w); return m ? esc(m.emoji || m.name[0]) : ""; }).join("") : ""}</span></div>`).join("")}
+        <button class="btn sm ghost add" data-act="newEvent" data-id="${d}">${ico("plus")} ${evs.length ? "" : "frei – Termin eintragen"}</button></div></div>`;
+    }).join("")}</div>
+    <p class="muted small" style="max-width:62ch">Tipp: Im Apple-Kalender auf dem Mac unter <i>Ablage → Exportieren</i> eine .ics-Datei sichern und hier importieren. Doppelte Termine werden erkannt.</p>
+  </div>`;
+}
+
+// ---------- Ansicht: Essen & Einkauf ----------
+function viewEssen() {
+  const ws = ui.mealWeek, t = today();
+  const days = Array.from({ length: 7 }, (_, i) => addDays(ws, i));
+  const open = all("shopping").filter(s => !s.done).sort((a, b) => (a.created || "").localeCompare(b.created || ""));
+  const done = all("shopping").filter(s => s.done).sort((a, b) => (b.doneAt || "").localeCompare(a.doneAt || "")).slice(0, 30);
+  return topBar("Essen") + `<div class="stack"><h1>Essen & Einkauf</h1><div class="grid2">
+    <section class="block"><header><h2>Einkaufsliste</h2><span class="muted small num">${open.length} offen</span></header>
+      <form data-form="shop" class="quick"><input type="text" id="shopIn" placeholder="Was fehlt? z. B. Milch, Brot" autocomplete="off" aria-label="Artikel"><button class="btn primary" type="submit" aria-label="Hinzufügen">${ico("plus")}</button></form>
+      ${open.length ? `<div class="shop">${open.map(s => `<button class="sitem" data-act="shopToggle" data-id="${s.id}"><span>${esc(s.text)}</span></button>`).join("")}</div>` : `<div class="empty">Liste ist leer.</div>`}
+      ${done.length ? `<div class="row" style="margin-top:8px"><span class="eyebrow" style="margin-right:auto">Zuletzt gekauft – antippen zum Wiederholen</span><button class="btn sm ghost" data-act="shopClear">Aufräumen</button></div>
+        <div class="shop">${done.map(s => `<button class="sitem done" data-act="shopToggle" data-id="${s.id}"><span>${esc(s.text)}</span></button>`).join("")}</div>` : ""}
+    </section>
+    <section class="block"><header><h2>Essensplan</h2>
+      <button class="iconbtn" data-act="mealWeek" data-id="-7" aria-label="Vorige Woche">${ico("left")}</button><span class="small num">KW ${isoWeek(ws)}</span>
+      <button class="iconbtn" data-act="mealWeek" data-id="7" aria-label="Nächste Woche">${ico("right")}</button></header>
+      <div class="card meals" style="padding:4px 14px">${days.map(d => {
+        const m = S.meals[d] || {};
+        return `<div class="meal ${d === t ? "today" : ""}" data-act="editMeal" data-id="${d}"><div class="dn">${WD[parseYmd(d).getDay()]}<small class="num">${parseYmd(d).getDate()}.${parseYmd(d).getMonth() + 1}.</small></div>
+          <div style="min-width:0">${m.text ? esc(m.text) : '<span class="muted">– planen –</span>'}${m.ingredients ? `<div class="muted small">${esc(m.ingredients.split("\n").filter(Boolean).length)} Zutaten</div>` : ""}</div>
+          <span class="muted">${ico("edit")}</span></div>`;
+      }).join("")}</div>
+      <p class="muted small">Zutaten beim Gericht eintragen, dann mit einem Tipp auf die Einkaufsliste.</p>
+    </section></div></div>`;
+}
+
+// ---------- Ansicht: Familie & Einstellungen ----------
+function viewFamilie() {
+  const ms = members(), set = settings();
+  return topBar("Familie") + `<div class="stack"><h1>Familie & Einstellungen</h1><div class="grid2">
+    <section class="block"><header><h2>Familienmitglieder</h2><button class="btn sm primary" data-act="newMember">${ico("plus")} Person</button></header>
+      <div class="card" style="padding:4px 14px"><div class="list">${ms.map(m => `<div class="item"><span class="dot" style="--pc:${esc(m.color)}"></span>
+        <div class="body" data-act="editMember" data-id="${m.id}"><span class="t">${esc(m.emoji || "")} ${esc(m.name)}</span>
+        <span class="meta">${m.kid ? `Kind · <span class="num">${m.stars || 0}</span> ⭐${m.goal ? ` · Ziel: ${esc(m.goal)} (${m.goalStars || 10})` : ""}` : "Erwachsen"}</span></div>
+        ${m.kid ? `<button class="btn sm" data-act="kidMode" data-id="${m.id}">Kinder-Ansicht</button>` : ""}</div>`).join("") || `<div class="empty" style="border:0">Noch niemand angelegt.</div>`}</div></div>
+    </section>
+    <section class="block"><header><h2>Einstellungen</h2></header>
+      <form data-form="settings" class="card stack">
+        <label class="f">Familienname (erscheint oben links)<input type="text" id="setFam" name="family" value="${esc(set.family || "")}" placeholder="z. B. Familie Hillmann"></label>
+        <label class="f">„Heute wichtig“ zeigt höchstens
+          <select name="topN" id="setTop">${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${+set.topN === n ? "selected" : ""}>${n} Aufgabe${n > 1 ? "n" : ""}</option>`).join("")}</select></label>
+        <div><button class="btn primary" type="submit">Speichern</button></div>
+      </form>
+    </section>
+    <section class="block"><header><h2>Synchronisieren</h2></header>
+      <div class="card stack small">
+        <div class="row">${syncPill()}</div>
+        ${sync.mode === "cloud" ? `<p>Alle Änderungen landen sofort auf jedem Gerät, auf dem diese Seite geöffnet ist – iPhone, iPad und MacBook.</p>
+          <p class="muted">Partner:in dazuholen: oben rechts auf „Teilen“ tippen und per E-Mail als <b>Bearbeiter:in</b> einladen. Nur wer bearbeiten darf, kann auch abhaken.</p>`
+        : `<p>Diese Kopie speichert nur in diesem Browser. Für den Abgleich zwischen Geräten die Version auf claude.ai verwenden.</p>`}
+        <p class="muted">Aufs iPhone/iPad legen: Seite in Safari öffnen → Teilen → „Zum Home-Bildschirm“.</p>
+      </div></section>
+    <section class="block"><header><h2>Datensicherung</h2></header>
+      <div class="card stack small"><p class="muted">Sichert alle Daten als JSON-Datei. Beim Einspielen werden Einträge ergänzt oder überschrieben, nichts wird gelöscht.</p>
+        <div class="row"><button class="btn" data-act="exportJson">${ico("download")} Sichern</button><button class="btn" data-act="importJson">${ico("upload")} Einspielen</button></div></div>
+    </section>
+  </div></div>`;
+}
+
+// ---------- Sheets (Dialoge) ----------
+let sheetCtx = null;
+function openSheet(title, formName, body, foot, ctx) {
+  sheetCtx = ctx || null;
+  $("#sheetRoot").innerHTML = `<div class="scrim" data-act="closeSheet"></div>
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}"><header><h2>${esc(title)}</h2><button class="iconbtn" data-act="closeSheet" aria-label="Schließen">${ico("x")}</button></header>
+    <form data-form="${formName}">${body}<div class="foot">${foot}</div></form></div>`;
+  const first = $("#sheetRoot input[type=text], #sheetRoot textarea");
+  if (first && !("ontouchstart" in window)) first.focus();
+}
+function closeSheet() { $("#sheetRoot").innerHTML = ""; sheetCtx = null; }
+const memberOptions = (sel, none = "Niemand bestimmtes") => `<option value="">${none}</option>` + members().map(m => `<option value="${m.id}" ${sel === m.id ? "selected" : ""}>${esc((m.emoji || "") + " " + m.name)}</option>`).join("");
+const delBtn = (act, id) => `<button type="button" class="btn danger" data-act="armDelete" data-do="${act}" data-id="${id}">${ico("trash")} Löschen</button>`;
+
+function taskSheet(id) {
+  const k = id ? { ...S.tasks[id], id } : { title: "", list: ui.taskTab === "inbox" || ui.taskTab === "erledigt" ? "heute" : ui.taskTab, who: ui.who !== "all" ? ui.who : "", due: "", minutes: "", repeat: "none", note: "" };
+  openSheet(id ? "Aufgabe" : "Neue Aufgabe", "task", `
+    <label class="f">Was ist zu tun?<input type="text" name="title" id="tkTitle" value="${esc(k.title)}" required autocomplete="off"></label>
+    <div class="fgrid">
+      <label class="f">Wo einsortieren?<select name="list">${[["inbox", "Eingang"], ["heute", "Heute"], ["bald", "Bald"], ["irgendwann", "Irgendwann"]].map(([v, l]) => `<option value="${v}" ${k.list === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label class="f">Wer?<select name="who">${memberOptions(k.who)}</select></label>
+      <label class="f">Fällig am<input type="date" name="due" value="${esc(k.due || "")}"></label>
+      <label class="f">Dauer ca.<select name="minutes">${["", 5, 10, 15, 30, 45, 60, 90, 120].map(v => `<option value="${v}" ${String(k.minutes || "") === String(v) ? "selected" : ""}>${v ? v + " Min" : "–"}</option>`).join("")}</select></label>
+      <label class="f">Wiederholen<select name="repeat">${[["none", "nein"], ["daily", "täglich"], ["weekly", "wöchentlich"]].map(([v, l]) => `<option value="${v}" ${k.repeat === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+    </div>
+    <label class="f">Notiz<textarea name="note">${esc(k.note || "")}</textarea></label>`,
+    `<button class="btn primary" type="submit">Speichern</button>${id ? delBtn("delTask", id) : ""}`, { id });
+}
+function eventSheet(id, date) {
+  const e = id ? { ...S.events[id], id } : { title: "", date: date || today(), start: "", end: "", lead: 0, who: ui.who !== "all" ? [ui.who] : [], repeat: "none", note: "" };
+  const reps = [["none", "nein"], ["weekly", "jede Woche"], ["weekly2", "alle 2 Wochen"], ["monthly", "jeden Monat"], ["yearly", "jedes Jahr"]];
+  const rsel = e.repeat === "weekly" && (e.interval || 1) === 2 ? "weekly2" : e.repeat || "none";
+  openSheet(id ? "Termin" : "Neuer Termin", "event", `
+    <label class="f">Was?<input type="text" name="title" id="evTitle" value="${esc(e.title)}" required autocomplete="off"></label>
+    <div class="fgrid">
+      <label class="f">Datum<input type="date" name="date" value="${esc(e.date)}" required></label>
+      <label class="f">Beginn (leer = ganztägig)<input type="time" name="start" value="${esc(e.start || "")}"></label>
+      <label class="f">Ende<input type="time" name="end" value="${esc(e.end || "")}"></label>
+      <label class="f">Vorlauf (Anziehen, Fahrt)<select name="lead">${[0, 5, 10, 15, 20, 30, 45, 60].map(v => `<option value="${v}" ${+(e.lead || 0) === v ? "selected" : ""}>${v ? v + " Min vorher los" : "kein Vorlauf"}</option>`).join("")}</select></label>
+      <label class="f">Wiederholen<select name="repeat">${reps.map(([v, l]) => `<option value="${v}" ${rsel === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+    </div>
+    <div class="f" style="font-size:.85rem;color:var(--muted);font-weight:500">Wer ist dabei?<div class="row" style="gap:6px;margin-top:6px">
+      ${members().map(m => `<label class="chip"><input type="checkbox" name="who" value="${m.id}" ${(e.who || []).includes(m.id) ? "checked" : ""}>${esc((m.emoji || "") + " " + m.name)}</label>`).join("")}</div></div>
+    <label class="f">Notiz<textarea name="note">${esc(e.note || "")}</textarea></label>
+    ${e.repeat && e.repeat !== "none" && id ? `<p class="muted small">Serientermin: Änderungen gelten für alle Wiederholungen.</p>` : ""}`,
+    `<button class="btn primary" type="submit">Speichern</button>${id ? delBtn("delEvent", id) : ""}`, { id });
+}
+function memberSheet(id) {
+  const m = id ? { ...S.members[id], id } : { name: "", emoji: "🙂", color: PCOLORS[members().length % PCOLORS.length], kid: false, goal: "", goalStars: 10, stars: 0 };
+  openSheet(id ? "Person bearbeiten" : "Neue Person", "member", `
+    <div class="fgrid"><label class="f">Name<input type="text" name="name" id="mName" value="${esc(m.name)}" required></label>
+      <label class="f">Emoji<input type="text" name="emoji" value="${esc(m.emoji || "")}" maxlength="4"></label></div>
+    <div class="f" style="font-size:.85rem;color:var(--muted);font-weight:500">Farbe<div class="row" style="gap:8px;margin-top:6px">
+      ${PCOLORS.map(c => `<label class="chip" style="--pc:${c}"><input type="radio" name="color" value="${c}" ${m.color === c ? "checked" : ""}><span class="dot"></span></label>`).join("")}</div></div>
+    <label class="chip" style="align-self:flex-start"><input type="checkbox" name="kid" ${m.kid ? "checked" : ""}>Kind (bekommt Sterne & Kinder-Ansicht)</label>
+    <div class="fgrid"><label class="f">Belohnungsziel<input type="text" name="goal" value="${esc(m.goal || "")}" placeholder="z. B. Eis essen gehen"></label>
+      <label class="f">Sterne bis zum Ziel<input type="number" name="goalStars" min="1" max="50" value="${esc(m.goalStars || 10)}"></label>
+      <label class="f">Sterne jetzt<input type="number" name="stars" min="0" max="999" value="${esc(m.stars || 0)}"></label></div>`,
+    `<button class="btn primary" type="submit">Speichern</button>${id ? delBtn("delMember", id) : ""}`, { id });
+}
+function mealSheet(d) {
+  const m = S.meals[d] || {};
+  openSheet(fmtDay(d), "meal", `
+    <label class="f">Gericht<input type="text" name="text" id="mealText" value="${esc(m.text || "")}" placeholder="z. B. Nudeln mit Tomatensoße" autocomplete="off"></label>
+    <label class="f">Zutaten (eine pro Zeile)<textarea name="ingredients" placeholder="Nudeln&#10;Passierte Tomaten&#10;Parmesan">${esc(m.ingredients || "")}</textarea></label>`,
+    `<button class="btn primary" type="submit">Speichern</button><button class="btn" type="button" data-act="mealToShop" data-id="${d}">Zutaten auf Einkaufsliste</button>`, { d });
+}
+
+// Routinen-Editor mit Entwurf, damit Schritte verschoben werden können
+let rDraft = null;
+function routineSheet(id) {
+  rDraft = id ? clone({ ...S.routines[id], id }) : { name: "", emoji: "🌞", who: ui.who !== "all" ? ui.who : "", start: "", stars: 1, steps: [{ id: newId(), emoji: "", text: "", minutes: 3 }] };
+  drawRoutineSheet();
+}
+function drawRoutineSheet() {
+  const r = rDraft;
+  openSheet(r.id ? "Routine bearbeiten" : "Neue Routine", "routine", `
+    <div class="fgrid"><label class="f">Name<input type="text" name="name" id="rName" value="${esc(r.name)}" required></label>
+      <label class="f">Emoji<input type="text" name="emoji" value="${esc(r.emoji || "")}" maxlength="4"></label>
+      <label class="f">Für wen?<select name="who">${memberOptions(r.who, "Alle")}</select></label>
+      <label class="f">Uhrzeit (optional)<input type="time" name="start" value="${esc(r.start || "")}"></label>
+      <label class="f">Sterne am Ende<select name="stars">${[0, 1, 2, 3].map(n => `<option value="${n}" ${+r.stars === n ? "selected" : ""}>${n ? "⭐".repeat(n) : "keine"}</option>`).join("")}</select></label></div>
+    <div class="stack" style="gap:8px"><div class="row"><b style="margin-right:auto">Schritte</b><span class="muted small">Emoji · Text · Minuten</span></div>
+      ${r.steps.map((s, i) => `<div class="stepedit">
+        <input type="text" class="emo" name="se_${i}" value="${esc(s.emoji || "")}" maxlength="4" aria-label="Emoji Schritt ${i + 1}">
+        <input type="text" name="st_${i}" value="${esc(s.text || "")}" placeholder="z. B. Zähne putzen" aria-label="Schritt ${i + 1}">
+        <input type="number" name="sm_${i}" value="${esc(s.minutes ?? "")}" min="0" max="120" aria-label="Minuten Schritt ${i + 1}">
+        <div class="ctl"><button type="button" class="iconbtn" data-act="stepMove" data-id="${i}" data-dir="-1" aria-label="Nach oben">${ico("up")}</button>
+        <button type="button" class="iconbtn" data-act="stepMove" data-id="${i}" data-dir="1" aria-label="Nach unten">${ico("down")}</button>
+        <button type="button" class="iconbtn" data-act="stepDel" data-id="${i}" aria-label="Schritt löschen">${ico("x")}</button></div></div>`).join("")}
+      <button type="button" class="btn sm" data-act="stepAdd" style="align-self:flex-start">${ico("plus")} Schritt</button></div>`,
+    `<button class="btn primary" type="submit">Speichern</button>${r.id ? delBtn("delRoutine", r.id) : ""}`);
+}
+function readRoutineForm() {
+  const f = $("#sheetRoot form"); if (!f) return; const fd = new FormData(f);
+  rDraft.name = fd.get("name") || ""; rDraft.emoji = fd.get("emoji") || ""; rDraft.who = fd.get("who") || ""; rDraft.start = fd.get("start") || ""; rDraft.stars = +fd.get("stars") || 0;
+  rDraft.steps.forEach((s, i) => { s.emoji = fd.get("se_" + i) || ""; s.text = fd.get("st_" + i) || ""; s.minutes = fd.get("sm_" + i) === "" ? 0 : +fd.get("sm_" + i); });
+}
+
+const PCOLORS = ["#2E86DE", "#D9486E", "#E08A1E", "#3BA55C", "#8E5CD9", "#1AA3A3"];
+const TEMPLATES = [
+  { key: "kid-am", name: "Morgenroutine", emoji: "🌞", kid: true, start: "07:00", stars: 1, steps: [["🚽", "Aufs Klo", 2], ["🧼", "Hände und Gesicht waschen", 3], ["👕", "Anziehen", 5], ["🥣", "Frühstücken", 15], ["🦷", "Zähne putzen", 3], ["🧥", "Schuhe und Jacke an", 4]] },
+  { key: "kid-pm", name: "Abendroutine", emoji: "🌙", kid: true, start: "18:30", stars: 1, steps: [["🧸", "Spielzeug aufräumen", 5], ["🛁", "Waschen oder baden", 10], ["🩳", "Schlafanzug an", 3], ["🦷", "Zähne putzen", 3], ["📖", "Geschichte hören", 10], ["😴", "Licht aus, kuscheln", 5]] },
+  { key: "out", name: "Aus dem Haus", emoji: "🚪", kid: false, start: "", stars: 0, steps: [["🔑", "Schlüssel", 0], ["📱", "Handy", 0], ["👛", "Geldbeutel", 0], ["🧃", "Trinkflasche und Snack fürs Kind", 0], ["🌂", "Wetter: Jacke oder Schirm?", 0], ["🔌", "Herd aus, Fenster zu", 0]] },
+  { key: "mom-am", name: "Morgenstart", emoji: "☕", kid: false, start: "06:30", stars: 0, steps: [["💊", "Medikament nehmen", 1], ["💧", "Ein Glas Wasser", 1], ["📅", "Heute-Ansicht anschauen", 2], ["🎯", "Die wichtigsten 3 Dinge festlegen", 3]] },
+  { key: "reset", name: "Abend-Reset", emoji: "🧺", kid: false, start: "20:30", stars: 0, steps: [["🍽️", "Küche: 10 Minuten, dann Schluss", 10], ["🎒", "Taschen für morgen packen", 5], ["👕", "Kleidung für morgen rauslegen", 3], ["📅", "Morgen kurz anschauen", 3], ["🔌", "Handy ans Ladekabel", 1]] }
+];
+function tplToRoutine(t, who) { return { name: t.name, emoji: t.emoji, who: who || "", start: t.start, stars: t.stars, steps: t.steps.map(([e, x, m]) => ({ id: newId(), emoji: e, text: x, minutes: m })) }; }
+function templatesSheet() {
+  openSheet("Vorlage wählen", "tpl", `<div class="list">${TEMPLATES.map(t => `<div class="item"><span style="font-size:1.8rem">${t.emoji}</span>
+    <div class="body"><span class="t"><b>${esc(t.name)}</b> ${t.kid ? '<span class="tag">Kind</span>' : ""}</span><span class="meta">${t.steps.map(s => s[0]).join(" ")}</span></div>
+    <select name="who_${t.key}" aria-label="Für wen" style="width:auto;min-width:120px">${memberOptions(defaultWho(t.kid), "Alle")}</select>
+    <button type="button" class="btn sm primary" data-act="useTpl" data-id="${t.key}">Anlegen</button></div>`).join("")}</div>`, "");
+}
+function defaultWho(kid) { const ms = members(); const m = kid ? ms.find(x => x.kid) : ms.find(x => !x.kid); return m ? m.id : ""; }
+
+// ---------- Overlays: Routine-Player, Fokus, Kinder-Ansicht ----------
+let ov = null, tickT = null, wake = null;
+function openOverlay(o) { ov = o; renderOverlay(); startTick(); requestWake(); }
+function closeOverlay() {
+  const back = ov && ov.back; ov = null; $("#ovRoot").innerHTML = ""; stopTick();
+  if (back) openOverlay(back); else { releaseWake(); schedule(); }
+}
+function startTick() { stopTick(); tickT = setInterval(tickOverlay, 1000); }
+function stopTick() { if (tickT) clearInterval(tickT); tickT = null; }
+async function requestWake() { try { if (!wake && navigator.wakeLock) wake = await navigator.wakeLock.request("screen"); } catch { wake = null; } }
+function releaseWake() { try { wake && wake.release(); } catch { } wake = null; }
+
+function renderOverlay() {
+  if (!ov) return;
+  let html = "";
+  if (ov.type === "player") html = playerHTML();
+  else if (ov.type === "focus") html = focusHTML();
+  else if (ov.type === "kid") html = kidHTML();
+  $("#ovRoot").innerHTML = `<div class="ov" role="dialog" aria-modal="true">${html}</div>`;
+}
+function tickOverlay() {
+  if (!ov) return;
+  if (ov.type === "player" && !ov.celebrate) { const el = $("#ovTimer"); if (el) el.innerHTML = playerTimer(); }
+  if (ov.type === "focus") { const el = $("#ovTimer"); if (el) el.innerHTML = focusTimer(); }
+}
+
+function startRoutine(rid, back) {
+  const r = S.routines[rid]; if (!r) return;
+  if (!(r.steps || []).length) { toast("Diese Routine hat noch keine Schritte."); return; }
+  const run = runOf(rid) || {};
+  const steps = r.steps || [];
+  let idx = run.finished ? 0 : steps.findIndex(s => !(run.done || []).includes(s.id));
+  if (idx < 0) idx = 0;
+  if (run.finished && !sync.readOnly) put("runs", rid + "_" + today(), { routine: rid, date: today(), done: [], finished: false });
+  openOverlay({ type: "player", rid, idx, t0: Date.now(), back });
+}
+function playerTimer() {
+  const r = S.routines[ov.rid]; const s = r && r.steps[ov.idx]; if (!s) return "";
+  const dur = (+s.minutes || 0) * 60; if (!dur) return "";
+  const el = (Date.now() - ov.t0) / 1000, left = Math.round(dur - el);
+  const txt = left >= 0 ? `noch ${Math.floor(left / 60)}:${pad(left % 60)}` : `${Math.floor(-left / 60)}:${pad(-left % 60)} drüber – macht nichts`;
+  return `${timerSVG(Math.max(0, left) / dur)}<div class="left num ${left < 0 ? "over" : ""}">${txt}</div>`;
+}
+function playerHTML() {
+  const r = S.routines[ov.rid]; if (!r) return `<p>Routine nicht gefunden.</p>`;
+  const steps = r.steps || [], run = runOf(ov.rid) || {}, done = run.done || [];
+  const m = member(r.who);
+  if (ov.celebrate) {
+    return `<div class="ovtop"><span class="name">${esc(r.name)}</span><button class="iconbtn" data-act="closeOv" aria-label="Schließen">${ico("x")}</button></div>
+      <div class="player celebrate"><div class="stepemo">🎉</div><div class="steptxt">Geschafft!</div>
+      ${r.stars && m && m.kid ? `<div class="stars">${"⭐".repeat(r.stars)}</div><p class="muted">${esc(m.name)} hat jetzt <b class="num">${m.stars || 0}</b> Sterne${m.goal ? ` – Ziel: ${esc(m.goal)} bei ${m.goalStars || 10}` : ""}.</p>` : `<p class="muted">Alle ${steps.length} Schritte erledigt.</p>`}
+      <button class="btn big primary" data-act="closeOv">Fertig</button></div>`;
+  }
+  const s = steps[ov.idx]; if (!s) return "";
+  const next = steps[ov.idx + 1];
+  return `<div class="ovtop"><span class="name">${esc(r.emoji || "")} ${esc(r.name)} ${m ? whoChip(m.id) : ""}</span><span class="num muted">${ov.idx + 1}/${steps.length}</span>
+      <button class="iconbtn" data-act="closeOv" aria-label="Pause – später weitermachen">${ico("x")}</button></div>
+    <div class="player">
+      <div class="pdots">${steps.map((x, i) => `<i class="${i === ov.idx ? "cur" : done.includes(x.id) ? "on" : ""}"></i>`).join("")}</div>
+      <div class="stepemo">${esc(s.emoji || "✨")}</div>
+      <div class="steptxt">${esc(s.text || "Schritt " + (ov.idx + 1))}</div>
+      <div id="ovTimer" style="display:flex;flex-direction:column;align-items:center;gap:8px">${playerTimer()}</div>
+      <button class="btn big primary" data-act="stepDone">${ico("check")} Geschafft</button>
+      <div class="row" style="justify-content:center">${ov.idx > 0 ? `<button class="btn ghost" data-act="stepBack">Zurück</button>` : ""}<button class="btn ghost" data-act="stepSkip">Überspringen</button></div>
+      ${next ? `<div class="nextup">Danach: ${esc(next.emoji || "")} ${esc(next.text || "")}</div>` : ""}
+    </div>`;
+}
+function advanceStep(markDone) {
+  const r = S.routines[ov.rid]; if (!r) return;
+  const steps = r.steps || [], key = ov.rid + "_" + today();
+  const run = clone(runOf(ov.rid) || { routine: ov.rid, date: today(), done: [], finished: false });
+  run.done = run.done || [];
+  if (markDone && !run.done.includes(steps[ov.idx].id)) run.done.push(steps[ov.idx].id);
+  if (markDone) chime(660);
+  let nxt = -1;
+  for (let i = ov.idx + 1; i < steps.length; i++) if (!run.done.includes(steps[i].id)) { nxt = i; break; }
+  if (nxt < 0) for (let i = 0; i < ov.idx; i++) if (!run.done.includes(steps[i].id)) { nxt = i; break; }
+  if (nxt < 0 && run.done.length >= steps.length) {
+    run.finished = true; run.finishedAt = new Date().toISOString();
+    put("runs", key, run);
+    const m = member(r.who);
+    if (r.stars && m && m.kid) patch("members", m.id, { stars: (m.stars || 0) + r.stars });
+    ov.celebrate = true; chime(880); confetti();
+  } else {
+    put("runs", key, run);
+    ov.idx = nxt < 0 ? Math.min(ov.idx + 1, steps.length - 1) : nxt; ov.t0 = Date.now();
+  }
+  renderOverlay();
+}
+
+function focusTimer() {
+  const f = ov; const total = f.dur * 60;
+  const el = f.paused ? f.elapsed : f.elapsed + (Date.now() - f.t0) / 1000;
+  const left = Math.max(0, Math.round(total - el));
+  if (left === 0 && !f.rang) { f.rang = true; chime(880); setTimeout(() => chime(990), 250); }
+  return `${timerSVG(left / total)}<div class="left num">${Math.floor(left / 60)}:${pad(left % 60)}</div>`;
+}
+function focusHTML() {
+  const k = S.tasks[ov.tid];
+  return `<div class="ovtop"><span class="name">Fokus</span><button class="iconbtn" data-act="closeOv" aria-label="Beenden">${ico("x")}</button></div>
+    <div class="player"><div class="eyebrow">Nur diese eine Sache</div><div class="steptxt">${esc(k ? k.title : "Aufgabe")}</div>
+      <div id="ovTimer" style="display:flex;flex-direction:column;align-items:center;gap:8px">${focusTimer()}</div>
+      <div class="row" style="justify-content:center">${[5, 15, 25, 45].map(n => `<button class="chip" data-act="focusDur" data-id="${n}" aria-pressed="${ov.dur === n}">${n} Min</button>`).join("")}</div>
+      <div class="row" style="justify-content:center"><button class="btn" data-act="focusPause">${ov.paused ? "Weiter" : "Pause"}</button>
+        ${k ? `<button class="btn big primary" data-act="focusDone">${ico("check")} Erledigt</button>` : ""}</div>
+      <p class="muted small">Ablenkung im Kopf? Unten notieren, später sortieren.</p>
+      <form data-form="dump" class="quick" style="width:100%;max-width:440px"><input type="text" id="dumpIn3" placeholder="Kurz parken …" autocomplete="off" aria-label="Gedanke parken"><button class="btn" type="submit" aria-label="Parken">${ico("plus")}</button></form>
+    </div>`;
+}
+
+function kidHTML() {
+  const m = member(ov.mid); if (!m) return `<p>Kind nicht gefunden.</p><button class="btn" data-act="closeOv">Zurück</button>`;
+  const t = today();
+  const rs = routines().filter(r => r.who === m.id);
+  const evs = all("events").filter(e => occursOn(e, t) && (e.who || []).includes(m.id)).sort((a, b) => (toMin(a.start) ?? -1) - (toMin(b.start) ?? -1));
+  const goal = m.goalStars || 10, have = m.stars || 0;
+  return `<div class="kid">
+    <div class="kidhead"><span class="e">${esc(m.emoji || "🧒")}</span><div style="flex:1;min-width:0"><h1>Hallo ${esc(m.name)}!</h1><div class="muted">${esc(fmtDay(t, { weekday: "long" }))}</div></div>
+      <button class="btn sm hold" id="holdExit" aria-label="Für Eltern: gedrückt halten zum Verlassen">Eltern ⏻</button></div>
+    <section class="card stack" style="gap:10px"><div class="row"><b style="margin-right:auto">Meine Sterne</b><span class="num">${have} / ${goal}</span></div>
+      <div class="jar">${Array.from({ length: Math.max(goal, have) }, (_, i) => `<span class="${i < have ? "" : "off"}">⭐</span>`).join("")}</div>
+      ${m.goal ? `<div>${have >= goal ? "🎁 Geschafft! Jetzt gibt es: " : "Dann gibt es: "}<b>${esc(m.goal)}</b></div>` : ""}
+      ${have >= goal ? `<button class="btn sm" data-act="redeem" data-id="${m.id}" style="align-self:flex-start">Belohnung eingelöst (Eltern)</button>` : ""}</section>
+    <div class="ktiles">${rs.map(r => {
+      const run = runOf(r.id) || {}, n = (r.steps || []).length, d = (run.done || []).length;
+      return `<button class="ktile ${run.finished ? "fin" : ""}" data-act="kidRoutine" data-id="${r.id}"><span class="e">${esc(r.emoji || "🔁")}</span><b>${esc(r.name)}</b>
+        <span class="muted">${run.finished ? "✅ fertig" : `${d} von ${n}`}</span></button>`;
+    }).join("") || `<div class="empty">Noch keine Routinen für ${esc(m.name)}.</div>`}</div>
+    ${evs.length ? `<section class="stack" style="gap:8px"><b>Heute</b>${evs.map(e => `<div class="kev"><span class="tm">${e.start ? esc(e.start) : "heute"}</span><span>${esc(e.title)}</span></div>`).join("")}</section>` : ""}
+  </div>`;
+}
+
+// ---------- Kleine Effekte ----------
+let actx = null;
+function chime(f) {
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = actx.createOscillator(), g = actx.createGain(); o.type = "sine"; o.frequency.value = f;
+    g.gain.setValueAtTime(.0001, actx.currentTime); g.gain.exponentialRampToValueAtTime(.18, actx.currentTime + .02); g.gain.exponentialRampToValueAtTime(.0001, actx.currentTime + .45);
+    o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + .5);
+  } catch { }
+}
+function confetti() {
+  if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const c = document.createElement("canvas"); c.className = "confetti"; document.body.appendChild(c);
+  const ctx = c.getContext("2d"), W = c.width = innerWidth, H = c.height = innerHeight;
+  const cols = ["#E3A01B", "#1B6B54", "#2E86DE", "#D9486E", "#3BA55C", "#8E5CD9"];
+  const P = Array.from({ length: 90 }, () => ({ x: W / 2, y: H * .45, vx: (Math.random() - .5) * 12, vy: -Math.random() * 12 - 4, s: 5 + Math.random() * 6, c: cols[(Math.random() * cols.length) | 0], r: Math.random() * 6 }));
+  let f = 0;
+  (function step() { ctx.clearRect(0, 0, W, H); P.forEach(p => { p.vy += .35; p.x += p.vx; p.y += p.vy; p.r += .1; ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r); ctx.fillStyle = p.c; ctx.fillRect(-p.s / 2, -p.s / 4, p.s, p.s / 2); ctx.restore(); });
+    if (++f < 110) requestAnimationFrame(step); else c.remove(); })();
+}
+let toastT;
+function toast(msg, undo) {
+  clearTimeout(toastT);
+  $("#toastRoot").innerHTML = `<div class="toast" role="status"><span>${esc(msg)}</span>${undo ? `<button data-act="undo">Rückgängig</button>` : ""}</div>`;
+  toast.undo = undo || null;
+  toastT = setTimeout(() => { $("#toastRoot").innerHTML = ""; toast.undo = null; }, undo ? 6000 : 3500);
+}
+
+// ---------- Aufgaben-Logik ----------
+function addDump(text) {
+  text = text.trim(); if (!text) return;
+  put("tasks", newId(), { title: text, list: "inbox", who: ui.who !== "all" ? ui.who : "", done: false, created: new Date().toISOString(), due: "", minutes: 0, repeat: "none", note: "" });
+  toast("Im Eingang geparkt.");
+}
+function toggleTask(id) {
+  const k = S.tasks[id]; if (!k) return;
+  if (!k.done && k.repeat && k.repeat !== "none") {
+    const base = k.due && k.due > today() ? k.due : today();
+    patch("tasks", id, { due: addDays(base, k.repeat === "daily" ? 1 : 7), lastDone: new Date().toISOString(), list: k.list === "heute" ? "bald" : k.list });
+    chime(660); toast(k.repeat === "daily" ? "Erledigt – kommt morgen wieder." : "Erledigt – kommt nächste Woche wieder."); return;
+  }
+  const prev = clone(k);
+  patch("tasks", id, { done: !k.done, doneAt: !k.done ? new Date().toISOString() : "" });
+  if (!k.done) { chime(660); toast("Erledigt. 👏", () => put("tasks", id, prev)); }
+}
+
+// ---------- Kalender-Import (.ics) ----------
+function unescIcs(s) { return String(s || "").replace(/\\n/gi, "\n").replace(/\\([,;\\])/g, "$1"); }
+function icsDate(p) {
+  if (!p) return null; const m = String(p.val || p).trim().match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?/); if (!m) return null;
+  if (!m[4]) return { date: `${m[1]}-${m[2]}-${m[3]}`, time: "" };
+  const d = m[7] ? new Date(Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5])) : new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5]);
+  return { date: ymd(d), time: `${pad(d.getHours())}:${pad(d.getMinutes())}` };
+}
+function parseICS(text) {
+  const lines = text.replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
+  const out = []; let cur = null, depth = 0;
+  for (const line of lines) {
+    if (line === "BEGIN:VEVENT") { cur = {}; depth = 0; continue; }
+    if (line === "END:VEVENT") { if (cur) out.push(cur); cur = null; continue; }
+    if (!cur) continue;
+    if (line.startsWith("BEGIN:")) { depth++; continue; } if (line.startsWith("END:")) { depth--; continue; } if (depth > 0) continue; // VALARM usw. überspringen
+    const i = line.indexOf(":"); if (i < 0) continue;
+    const name = line.slice(0, i).split(";")[0].toUpperCase();
+    if (!(name in cur)) cur[name] = { val: line.slice(i + 1) };
+  }
+  return out.map(v => {
+    const s = icsDate(v.DTSTART); if (!s) return null; const e = icsDate(v.DTEND);
+    const ev = { title: unescIcs(v.SUMMARY && v.SUMMARY.val) || "(ohne Titel)", date: s.date, start: s.time, end: "", endDate: "", repeat: "none", interval: 1, days: [], until: "", who: [], lead: 0, note: unescIcs(v.DESCRIPTION && v.DESCRIPTION.val).slice(0, 500), uid: (v.UID && v.UID.val) || "" };
+    if (e) {
+      if (s.time && e.time && e.date === s.date) ev.end = e.time;
+      else if (!s.time && e.date) { const last = addDays(e.date, -1); if (last > s.date) ev.endDate = last; }
+      else if (e.date > s.date) ev.endDate = e.date;
+    }
+    const rr = v.RRULE && v.RRULE.val;
+    if (rr) {
+      const o = Object.fromEntries(rr.split(";").map(x => x.split("=")));
+      const f = { DAILY: "daily", WEEKLY: "weekly", MONTHLY: "monthly", YEARLY: "yearly" }[o.FREQ];
+      if (f) {
+        ev.repeat = f; ev.interval = +o.INTERVAL || 1;
+        if (o.BYDAY && f === "weekly") { const map = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 }; ev.days = o.BYDAY.split(",").map(x => map[x.slice(-2)]).filter(x => x !== undefined); }
+        if (o.UNTIL) { const u = icsDate({ val: o.UNTIL }); if (u) ev.until = u.date; }
+        else if (o.COUNT) { const n = +o.COUNT - 1, iv = ev.interval; ev.until = f === "daily" ? addDays(ev.date, n * iv) : f === "weekly" ? addDays(ev.date, Math.ceil((n + 1) / Math.max(1, ev.days.length)) * 7 * iv) : f === "monthly" ? addDays(ev.date, n * iv * 31) : addDays(ev.date, n * iv * 366); }
+      }
+    }
+    return ev;
+  }).filter(Boolean);
+}
+function hashId(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return "ics-" + h.toString(36); }
+function importIcsText(text) {
+  const evs = parseICS(text), cutoff = addDays(today(), -30);
+  let n = 0, skipped = 0;
+  const who = ui.who !== "all" ? [ui.who] : [];
+  for (const e of evs) {
+    if (e.repeat === "none" && (e.endDate || e.date) < cutoff) { skipped++; continue; }
+    if (e.until && e.until < cutoff) { skipped++; continue; }
+    const id = hashId((e.uid || e.title) + "|" + e.date + "|" + e.start);
+    const prev = S.events[id];
+    put("events", id, { ...e, who: prev ? prev.who : who, lead: prev ? prev.lead || 0 : 0, source: "ics" });
+    n++;
+  }
+  toast(n ? `${n} Termine übernommen${skipped ? `, ${skipped} alte übersprungen` : ""}.` : "Keine passenden Termine in der Datei gefunden.");
+}
+
+// ---------- Sichern / Einspielen ----------
+async function saveFile(filename, data, mime) {
+  try {
+    const dl = window.claude && window.claude.use ? await window.claude.use("downloads") : null;
+    if (dl) {
+      try { const r = await dl.save({ filename, data }); if (r && r.status === "saved") toast("Gesichert: " + filename); return; }
+      catch (e) { if (e && e.code === "declined") return; toast("Sichern ging hier nicht (" + ((e && e.code) || "Fehler") + ")."); return; }
+    }
+  } catch { }
+  const url = URL.createObjectURL(new Blob([data], { type: mime }));
+  const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+function importJsonText(text) {
+  let o; try { o = JSON.parse(text); } catch { toast("Die Datei ist kein gültiges Backup."); return; }
+  const data = o && o.app === "familienkompass" ? o.data : null;
+  if (!data) { toast("Das ist kein Familienkompass-Backup."); return; }
+  let n = 0;
+  COLS.forEach(c => { if (data[c] && typeof data[c] === "object") Object.entries(data[c]).forEach(([id, v]) => { if (v && typeof v === "object") { put(c, id, v); n++; } }); });
+  toast(`${n} Einträge eingespielt.`);
+}
+
+// ---------- Klick-Aktionen ----------
+const ACTS = {
+  who: id => { ui.who = id; lsSet("fk-who", id); ui.showMore = false; schedule(); },
+  tab: id => { ui.taskTab = id; if (ui.view !== "aufgaben") { location.hash = "aufgaben"; } schedule(); },
+  toggleMore: () => { ui.showMore = !ui.showMore; schedule(); },
+  toggleTask: id => toggleTask(id),
+  editTask: id => taskSheet(id),
+  newTask: () => taskSheet(null),
+  moveTask: (id, el) => { patch("tasks", id, { list: el.dataset.to }); },
+  focus: id => openOverlay({ type: "focus", tid: id, dur: Math.min(45, Math.max(5, (S.tasks[id] && +S.tasks[id].minutes) || 15)), t0: Date.now(), elapsed: 0, paused: false }),
+  focusDur: id => { ov.dur = +id; ov.t0 = Date.now(); ov.elapsed = 0; ov.rang = false; renderOverlay(); },
+  focusPause: () => { if (ov.paused) { ov.t0 = Date.now(); ov.paused = false; } else { ov.elapsed += (Date.now() - ov.t0) / 1000; ov.paused = true; } renderOverlay(); },
+  focusDone: () => { const id = ov.tid; closeOverlay(); toggleTask(id); },
+  newEvent: id => eventSheet(null, id),
+  editEvent: id => eventSheet(id),
+  week: id => { ui.weekStart = +id === 0 ? mondayOf(today()) : addDays(ui.weekStart, +id); schedule(); },
+  mealWeek: id => { ui.mealWeek = addDays(ui.mealWeek, +id); schedule(); },
+  importIcs: () => $("#fileIcs").click(),
+  newRoutine: () => routineSheet(null),
+  editRoutine: id => routineSheet(id),
+  templates: () => templatesSheet(),
+  useTpl: id => {
+    const t = TEMPLATES.find(x => x.key === id); if (!t) return;
+    const sel = $(`#sheetRoot select[name="who_${id}"]`);
+    put("routines", newId(), tplToRoutine(t, sel ? sel.value : defaultWho(t.kid)));
+    toast(`„${t.name}“ angelegt.`);
+  },
+  stepAdd: () => { readRoutineForm(); rDraft.steps.push({ id: newId(), emoji: "", text: "", minutes: 3 }); drawRoutineSheet(); },
+  stepDel: id => { readRoutineForm(); rDraft.steps.splice(+id, 1); drawRoutineSheet(); },
+  stepMove: (id, el) => { readRoutineForm(); const i = +id, j = i + (+el.dataset.dir); if (j < 0 || j >= rDraft.steps.length) return; const s = rDraft.steps; [s[i], s[j]] = [s[j], s[i]]; drawRoutineSheet(); },
+  startRoutine: id => startRoutine(id),
+  kidRoutine: id => startRoutine(id, { type: "kid", mid: ov.mid }),
+  stepDone: () => advanceStep(true),
+  stepSkip: () => advanceStep(false),
+  stepBack: () => { ov.idx = Math.max(0, ov.idx - 1); ov.t0 = Date.now(); renderOverlay(); },
+  closeOv: () => closeOverlay(),
+  kidMode: id => { closeSheet(); openOverlay({ type: "kid", mid: id }); },
+  redeem: id => { const m = S.members[id]; if (m) { patch("members", id, { stars: Math.max(0, (m.stars || 0) - (m.goalStars || 10)) }); toast("Belohnung eingelöst – neue Runde!"); } },
+  shopToggle: id => { const s = S.shopping[id]; if (s) patch("shopping", id, { done: !s.done, doneAt: !s.done ? new Date().toISOString() : "" }); },
+  shopClear: () => { const d = all("shopping").filter(s => s.done); d.forEach(s => del("shopping", s.id)); toast(`${d.length} erledigte Einträge entfernt.`); },
+  editMeal: id => mealSheet(id),
+  mealToShop: id => {
+    const f = $("#sheetRoot form"); const fd = f ? new FormData(f) : null;
+    const ing = String(fd ? fd.get("ingredients") : (S.meals[id] || {}).ingredients || "").split(/\n|,/).map(x => x.trim()).filter(Boolean);
+    if (fd) put("meals", id, { text: String(fd.get("text") || ""), ingredients: String(fd.get("ingredients") || "") });
+    const have = new Set(all("shopping").filter(s => !s.done).map(s => s.text.toLowerCase()));
+    let n = 0; ing.forEach(x => { if (!have.has(x.toLowerCase())) { const ex = all("shopping").find(s => s.done && s.text.toLowerCase() === x.toLowerCase()); if (ex) patch("shopping", ex.id, { done: false, doneAt: "" }); else put("shopping", newId(), { text: x, done: false, created: new Date().toISOString() }); n++; } });
+    closeSheet(); toast(n ? `${n} Zutaten auf der Einkaufsliste.` : "Alles schon auf der Liste.");
+  },
+  newMember: () => memberSheet(null),
+  editMember: id => memberSheet(id),
+  exportJson: () => saveFile(`familienkompass-${today()}.json`, JSON.stringify({ app: "familienkompass", v: 1, exported: new Date().toISOString(), data: S }, null, 1), "application/json"),
+  importJson: () => $("#fileJson").click(),
+  closeSheet: () => closeSheet(),
+  undo: () => { const u = toast.undo; $("#toastRoot").innerHTML = ""; toast.undo = null; if (u) u(); },
+  armDelete: (id, el) => {
+    if (!el.classList.contains("armed")) { el.classList.add("armed"); el.innerHTML = "Wirklich löschen?"; setTimeout(() => { if (el.isConnected) { el.classList.remove("armed"); el.innerHTML = ico("trash") + " Löschen"; } }, 4000); return; }
+    const col = { delTask: "tasks", delEvent: "events", delRoutine: "routines", delMember: "members" }[el.dataset.do];
+    const prev = clone(S[col][id]); del(col, id); closeSheet();
+    toast("Gelöscht.", () => put(col, id, prev));
+  }
+};
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act]"); if (!el) return;
+  const fn = ACTS[el.dataset.act]; if (!fn) return;
+  if (el.tagName !== "A" || el.dataset.act !== "tab") e.preventDefault();
+  fn(el.dataset.id, el, e);
+});
+
+// ---------- Formulare ----------
+const FORMS = {
+  dump: f => { const i = f.querySelector("input"); addDump(i.value); i.value = ""; i.focus(); },
+  shop: f => {
+    const i = f.querySelector("input"); const parts = i.value.split(",").map(x => x.trim()).filter(Boolean);
+    parts.forEach(x => { const ex = all("shopping").find(s => s.text.toLowerCase() === x.toLowerCase()); if (ex) patch("shopping", ex.id, { done: false, doneAt: "" }); else put("shopping", newId(), { text: x, done: false, created: new Date().toISOString() }); });
+    i.value = ""; i.focus();
+  },
+  setup: f => {
+    const fd = new FormData(f); const ids = [];
+    [0, 1, 2].forEach(i => { const n = String(fd.get("n" + i) || "").trim(); if (!n) return; const id = newId() + i; ids.push({ id, kid: !!fd.get("k" + i) });
+      put("members", id, { name: n, emoji: String(fd.get("e" + i) || ""), color: PCOLORS[i], kid: !!fd.get("k" + i), order: i, stars: 0, goal: fd.get("k" + i) ? "Eis essen gehen" : "", goalStars: 10 }); });
+    if (fd.get("tpl")) {
+      const kid = ids.find(x => x.kid), adult = ids.find(x => !x.kid);
+      TEMPLATES.forEach(t => put("routines", newId(), tplToRoutine(t, t.kid ? (kid && kid.id) : (adult && adult.id))));
+    }
+    toast("Willkommen! Alles angelegt.");
+  },
+  task: f => {
+    const fd = new FormData(f), id = (sheetCtx && sheetCtx.id) || newId(), prev = S.tasks[id] || {};
+    put("tasks", id, { ...prev, title: String(fd.get("title")).trim(), list: fd.get("list"), who: fd.get("who") || "", due: fd.get("due") || "", minutes: +fd.get("minutes") || 0, repeat: fd.get("repeat") || "none", note: String(fd.get("note") || ""), done: prev.done || false, created: prev.created || new Date().toISOString() });
+    closeSheet();
+  },
+  event: f => {
+    const fd = new FormData(f), id = (sheetCtx && sheetCtx.id) || newId(), prev = S.events[id] || {};
+    let rep = fd.get("repeat"), interval = 1; if (rep === "weekly2") { rep = "weekly"; interval = 2; }
+    const date = fd.get("date"); const keepDays = prev.repeat === "weekly" && rep === "weekly" && prev.date === date ? prev.days || [] : [];
+    put("events", id, { ...prev, title: String(fd.get("title")).trim(), date, start: fd.get("start") || "", end: fd.get("start") ? (fd.get("end") || "") : "", lead: +fd.get("lead") || 0, who: fd.getAll("who"), repeat: rep, interval, days: keepDays, note: String(fd.get("note") || "") });
+    closeSheet();
+  },
+  member: f => {
+    const fd = new FormData(f), id = (sheetCtx && sheetCtx.id) || newId(), prev = S.members[id] || {};
+    put("members", id, { ...prev, name: String(fd.get("name")).trim(), emoji: String(fd.get("emoji") || ""), color: fd.get("color") || prev.color || PCOLORS[0], kid: !!fd.get("kid"), goal: String(fd.get("goal") || ""), goalStars: Math.max(1, +fd.get("goalStars") || 10), stars: Math.max(0, +fd.get("stars") || 0), order: prev.order ?? members().length });
+    closeSheet();
+  },
+  meal: f => { const fd = new FormData(f), d = sheetCtx.d; const text = String(fd.get("text") || "").trim(), ing = String(fd.get("ingredients") || ""); if (!text && !ing.trim()) del("meals", d); else put("meals", d, { text, ingredients: ing }); closeSheet(); },
+  routine: f => {
+    readRoutineForm(); const r = rDraft; const id = r.id || newId();
+    r.steps = r.steps.filter(s => s.text.trim() || s.emoji.trim());
+    const data = clone(r); delete data.id; put("routines", id, data); closeSheet(); rDraft = null;
+  },
+  settings: f => { const fd = new FormData(f); put("settings", "main", { ...(S.settings.main || {}), family: String(fd.get("family") || "").trim(), topN: +fd.get("topN") || 3 }); toast("Gespeichert."); },
+  tpl: () => { }
+};
+document.addEventListener("submit", e => { const f = e.target; const fn = FORMS[f.dataset.form]; e.preventDefault(); if (fn) fn(f); });
+
+// Dateien einlesen
+$("#fileIcs").addEventListener("change", e => { const file = e.target.files[0]; e.target.value = ""; if (!file) return; file.text().then(importIcsText).catch(() => toast("Datei konnte nicht gelesen werden.")); });
+$("#fileJson").addEventListener("change", e => { const file = e.target.files[0]; e.target.value = ""; if (!file) return; file.text().then(importJsonText).catch(() => toast("Datei konnte nicht gelesen werden.")); });
+
+// Esc schließt Dialoge
+document.addEventListener("keydown", e => { if (e.key === "Escape") { if ($("#sheetRoot").innerHTML) closeSheet(); else if (ov && ov.type !== "kid") closeOverlay(); } });
+
+// Kinder-Ansicht verlassen: 1,5 Sekunden gedrückt halten
+let holdT = null;
+document.addEventListener("pointerdown", e => { const b = e.target.closest("#holdExit"); if (!b) return; b.classList.add("holding"); holdT = setTimeout(() => { holdT = null; ov = null; $("#ovRoot").innerHTML = ""; stopTick(); releaseWake(); schedule(); }, 1500); });
+["pointerup", "pointerleave", "pointercancel"].forEach(t => document.addEventListener(t, e => { if (holdT) { clearTimeout(holdT); holdT = null; const b = $("#holdExit"); if (b) b.classList.remove("holding"); } }, true));
+
+window.addEventListener("hashchange", () => { readHash(); closeSheet(); window.scrollTo(0, 0); schedule(); });
+// Uhrzeit & "Jetzt dran" aktuell halten
+let lastMin = -1;
+setInterval(() => { const m = nowMin(); if (m !== lastMin) { lastMin = m; if (!ov && !$("#sheetRoot").innerHTML && (ui.view === "heute" || ui.view === "kalender")) schedule(); } }, 5000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { if (ov) requestWake(); schedule(); } });
+
+// ---------- Start ----------
+readHash();
+loadLocal();
+render();
+initCloud();
+</script>

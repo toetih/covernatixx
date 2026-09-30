@@ -2007,10 +2007,11 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       var s = JSON.parse(localStorage.getItem('finanzen-ui') || '{}');
       if (s.tx) Object.assign(App.ui.tx, s.tx, { limit: 300 });
       if (s.quick) Object.assign(App.ui.quick, s.quick, { date: null });
+      if (s.rec && App.ui.rec) Object.assign(App.ui.rec, s.rec);
     } catch (e) { /* ignore */ }
   }
   function writeSettingsUI() {
-    try { localStorage.setItem('finanzen-ui', JSON.stringify({ tx: App.ui.tx, quick: App.ui.quick })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem('finanzen-ui', JSON.stringify({ tx: App.ui.tx, quick: App.ui.quick, rec: App.ui.rec })); } catch (e) { /* ignore */ }
   }
 
   /** Konten, die als „liquide“ zählen (Geld, keine Depots/Kredite/Sachwerte). */
@@ -3615,7 +3616,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
   };
 
   // ================================================================ WIEDERKEHREND
-  App.ui.rec = { account: '' };
+  App.ui.rec = { account: '', sort: 'category', dir: 1, flat: false };
 
   App.views.wiederkehrend = function (el) {
     var s = App.state;
@@ -3630,7 +3631,8 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     Object.keys(sums).forEach(function (k) { groups[k].forEach(function (r) { sums[k] += C.monthlyEquivalent(r); }); });
 
     var html = '<div class="page-head"><div><h1>Wiederkehrende Buchungen</h1><div class="sub">Daueraufträge, Verträge, Abos, Gehalt, Sparpläne – werden automatisch gebucht oder dir zur Bestätigung vorgelegt.</div></div>' +
-      '<div class="actions"><select data-f="account"><option value="">Alle Konten</option>' + App.accountOptions(f.account, { groups: true }) + '</select><button class="btn primary" data-act="new">+ Neu</button></div></div>';
+      '<div class="actions"><span class="seg" title="Darstellung"><button type="button" data-flat="0" class="' + (f.flat ? '' : 'on') + '">Nach Art</button><button type="button" data-flat="1" class="' + (f.flat ? 'on' : '') + '">Eine Liste</button></span>' +
+      '<select data-f="account"><option value="">Alle Konten</option>' + App.accountOptions(f.account, { groups: true }) + '</select><button class="btn primary" data-act="new">+ Neu</button></div></div>';
     html += '<div class="kpis">' +
       kpi('Feste Einnahmen / Monat', money(sums.income)) +
       kpi('Fixkosten / Monat', money(sums.expense)) +
@@ -3641,17 +3643,23 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     if (!rules.length) {
       html += '<div class="card"><div class="empty"><h3>Noch keine wiederkehrenden Buchungen</h3><p>Trag Miete, Gehalt, Versicherungen, Abos, Sparraten und Sparpläne einmal ein – sie werden dann automatisch gebucht.</p><button class="btn primary" data-act="new">Anlegen</button></div></div>';
     } else {
-      [['income', 'Einnahmen'], ['expense', 'Ausgaben'], ['loan', 'Kreditraten'], ['transfer', 'Umbuchungen'], ['savingsplan', 'Sparpläne'], ['inactive', 'Pausiert / beendet']].forEach(function (g) {
-        var list = groups[g[0]];
+      var KIND_LABEL = { income: 'Einnahme', expense: 'Ausgabe', loan: 'Kreditrate', transfer: 'Umbuchung', savingsplan: 'Sparplan' };
+      var sections = f.flat
+        ? [['all', 'Alle wiederkehrenden Buchungen', rules.filter(function (r) { return r.active; })], ['inactive', 'Pausiert / beendet', groups.inactive]]
+        : [['income', 'Einnahmen'], ['expense', 'Ausgaben'], ['loan', 'Kreditraten'], ['transfer', 'Umbuchungen'], ['savingsplan', 'Sparpläne'], ['inactive', 'Pausiert / beendet']].map(function (g) { return [g[0], g[1], groups[g[0]]]; });
+      function arrow(k) { return f.sort === k ? (f.dir > 0 ? ' ↑' : ' ↓') : ''; }
+      function th(k, label, cls) { return '<th class="sortable' + (cls ? ' ' + cls : '') + '" data-sort="' + k + '" title="Sortieren">' + label + arrow(k) + '</th>'; }
+      sections.forEach(function (g) {
+        var list = g[2];
         if (!list.length) return;
-        list.sort(function (a, b) {
-          var ca = C.categoryPath(s, a.categoryId), cb = C.categoryPath(s, b.categoryId);
-          return ca.localeCompare(cb, 'de') || a.name.localeCompare(b.name, 'de');
-        });
-        html += '<div class="card"><div class="card-head"><h2>' + g[1] + ' <span class="badge">' + list.length + '</span></h2>' + (g[0] !== 'inactive' ? '<span class="bold">' + money(sums[g[0]]) + ' / Monat</span>' : '') + '</div><div class="card-body flush tbl-wrap"><table class="tbl"><thead><tr><th>Name</th><th>Konto / Kategorie</th><th>Rhythmus</th><th>Nächster Termin</th><th>Modus</th><th class="num">Betrag</th><th class="num">pro Monat</th><th></th></tr></thead><tbody>';
+        list.sort(ruleSorter(s, f));
+        var sum = 0;
+        list.forEach(function (r) { sum += C.monthlyEquivalent(r); });
+        html += '<div class="card"><div class="card-head"><h2>' + g[1] + ' <span class="badge">' + list.length + '</span></h2>' + (g[0] !== 'inactive' ? '<span class="bold">' + money(g[0] === 'all' ? sum : sums[g[0]]) + ' / Monat' + (g[0] === 'all' ? ' <span class="help">(Saldo)</span>' : '') + '</span>' : '') + '</div><div class="card-body flush tbl-wrap"><table class="tbl"><thead><tr>' +
+          th('name', 'Name') + '<th class="sortable" data-sort="category" title="Sortieren">Konto / Kategorie' + arrow('category') + '</th><th>Rhythmus</th>' + th('date', 'Nächster Termin') + '<th>Modus</th>' + th('amount', 'Betrag', 'num') + th('monthly', 'pro Monat', 'num') + '<th></th></tr></thead><tbody>';
         list.forEach(function (r) {
           var overdue = r.active && r.nextDate <= today();
-          html += '<tr class="click' + (r.active ? '' : ' muted') + '" data-rule="' + r.id + '"><td class="bold">' + esc(r.name) + (r.note ? '<div class="small">' + esc(r.note) + '</div>' : '') + '</td><td>' + esc(App.ruleAccountsLabel(r)) + '</td>' +
+          html += '<tr class="click' + (r.active ? '' : ' muted') + '" data-rule="' + r.id + '"><td class="bold">' + esc(r.name) + (f.flat ? ' <span class="badge">' + esc(KIND_LABEL[C.ruleKind(r)] || '') + '</span>' : '') + (r.note ? '<div class="small">' + esc(r.note) + '</div>' : '') + '</td><td>' + esc(App.ruleAccountsLabel(r)) + '</td>' +
             '<td class="nowrap">' + esc(C.frequencyLabel(r)) + '</td><td class="nowrap' + (overdue ? ' bold' : '') + '">' + (r.active ? C.formatDate(r.nextDate) + (overdue ? ' <span class="badge warn">fällig</span>' : '') : (r.endDate ? 'bis ' + C.formatDate(r.endDate) : 'pausiert')) + (r.endDate && r.active ? '<div class="small">bis ' + C.formatDate(r.endDate) + '</div>' : '') + '</td>' +
             '<td>' + (r.mode === 'auto' ? '<span class="badge accent">automatisch</span>' : '<span class="badge">bestätigen</span>') + '</td>' +
             '<td class="num bold">' + money(C.ruleAmount(r)) + '</td><td class="num">' + money(C.monthlyEquivalent(r)) + '</td>' +
@@ -3663,6 +3671,16 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     el.innerHTML = html;
     $('[data-f="account"]', el).onchange = function () { f.account = this.value; App.render(); };
     el.onclick = function (e) {
+      var fl = e.target.closest('[data-flat]');
+      if (fl) { f.flat = fl.dataset.flat === '1'; App.render(); return; }
+      var so = e.target.closest('[data-sort]');
+      if (so) {
+        var k = so.dataset.sort;
+        // Beträge standardmäßig groß → klein, Termine früh → spät, Texte A → Z
+        if (f.sort === k) f.dir = -f.dir; else { f.sort = k; f.dir = (k === 'amount' || k === 'monthly') ? -1 : 1; }
+        App.render();
+        return;
+      }
       var a = e.target.closest('[data-act]');
       if (a) {
         e.stopPropagation();
@@ -3674,6 +3692,23 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       if (tr) App.editRule(C.findById(s.recurring, tr.dataset.rule));
     };
   };
+
+  /** Sortierung wiederkehrender Buchungen: category | name | date | amount | monthly */
+  function ruleSorter(s, f) {
+    var dir = f.dir || 1;
+    function dateOf(r) { return r.active ? r.nextDate || '9999' : (r.endDate || '9999'); }
+    return function (a, b) {
+      var v;
+      switch (f.sort) {
+        case 'name': v = a.name.localeCompare(b.name, 'de'); break;
+        case 'date': v = dateOf(a) < dateOf(b) ? -1 : dateOf(a) > dateOf(b) ? 1 : 0; break;
+        case 'amount': v = Math.abs(C.ruleAmount(a)) - Math.abs(C.ruleAmount(b)); break;
+        case 'monthly': v = Math.abs(C.monthlyEquivalent(a)) - Math.abs(C.monthlyEquivalent(b)); break;
+        default: v = C.categoryPath(s, a.categoryId).localeCompare(C.categoryPath(s, b.categoryId), 'de');
+      }
+      return (v * dir) || a.name.localeCompare(b.name, 'de');
+    };
+  }
 
   App.editRule = function (r, preset) {
     var s = App.state;

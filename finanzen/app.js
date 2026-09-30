@@ -48,10 +48,11 @@
       var s = JSON.parse(localStorage.getItem('finanzen-ui') || '{}');
       if (s.tx) Object.assign(App.ui.tx, s.tx, { limit: 300 });
       if (s.quick) Object.assign(App.ui.quick, s.quick, { date: null });
+      if (s.rec && App.ui.rec) Object.assign(App.ui.rec, s.rec);
     } catch (e) { /* ignore */ }
   }
   function writeSettingsUI() {
-    try { localStorage.setItem('finanzen-ui', JSON.stringify({ tx: App.ui.tx, quick: App.ui.quick })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem('finanzen-ui', JSON.stringify({ tx: App.ui.tx, quick: App.ui.quick, rec: App.ui.rec })); } catch (e) { /* ignore */ }
   }
 
   /** Konten, die als „liquide“ zählen (Geld, keine Depots/Kredite/Sachwerte). */

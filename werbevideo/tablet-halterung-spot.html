@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Tablet-Halterung – Werbespot</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  Werbespot "Tablet-Halterung" – Thorsten Hillmann Keyboard-Sounds
+  Format über URL wählen:  ?f=v  (1080x1920, Reels/Shorts/TikTok)
+                           ?f=h  (1920x1080, YouTube/Shop)
+  Vorschau im Browser:     ?play  (spielt die Animation in Echtzeit ab)
+  Rendern:                 node render.mjs  (Frame für Frame über window.seek(t))
+-->
+<style>
+@font-face{font-family:Syne;font-weight:700;src:url(fonts/syne-latin-700-normal.woff2) format("woff2")}
+@font-face{font-family:Syne;font-weight:800;src:url(fonts/syne-latin-800-normal.woff2) format("woff2")}
+@font-face{font-family:"Space Mono";font-weight:400;src:url(fonts/space-mono-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:"Space Mono";font-weight:700;src:url(fonts/space-mono-latin-700-normal.woff2) format("woff2")}
+@font-face{font-family:Inter;font-weight:400;src:url(fonts/inter-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:Inter;font-weight:600;src:url(fonts/inter-latin-600-normal.woff2) format("woff2")}
+@font-face{font-family:Inter;font-weight:800;src:url(fonts/inter-latin-800-normal.woff2) format("woff2")}
+
+:root{
+  --accent:#e8000d; --bg:#0a0a0a; --surface:#141414; --border:#2a2a2a;
+  --text:#f0f0f0; --muted:#a9a9b2;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#000;overflow:hidden}
+#root{position:relative;overflow:hidden;background:var(--bg);color:var(--text);font-family:Inter,sans-serif}
+.v #root{width:1080px;height:1920px}
+.h #root{width:1920px;height:1080px}
+
+/* Bühnenlicht */
+.bg{position:absolute;inset:0;pointer-events:none}
+.bg .spot{position:absolute;border-radius:50%;filter:blur(40px)}
+.bg .s1{background:radial-gradient(circle,rgba(232,0,13,.35),rgba(232,0,13,0) 65%)}
+.bg .s2{background:radial-gradient(circle,rgba(255,255,255,.10),rgba(255,255,255,0) 60%)}
+.v .bg .s1{width:1400px;height:1400px;left:-160px;top:420px}
+.v .bg .s2{width:1100px;height:1100px;left:-10px;top:-450px}
+.h .bg .s1{width:1500px;height:1500px;left:800px;top:-260px}
+.h .bg .s2{width:1000px;height:1000px;left:-300px;top:-500px}
+.beam{position:absolute;top:-200px;width:260px;height:1700px;background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,0) 80%);transform-origin:50% 0;filter:blur(6px)}
+
+/* Marke */
+.brand{position:absolute;font-family:"Space Mono",monospace;font-weight:700;letter-spacing:.18em;text-transform:uppercase;font-size:22px;color:#fff;display:flex;align-items:center;gap:14px}
+.brand i{width:12px;height:12px;border-radius:50%;background:var(--accent);box-shadow:0 0 18px var(--accent)}
+.brand span{color:var(--muted);font-weight:400}
+.v .brand{left:0;right:0;justify-content:center;top:150px}
+.h .brand{left:90px;top:70px}
+
+/* Szenentexte */
+.scene{position:absolute}
+.v .scene{left:70px;right:70px;top:290px;text-align:center}
+.h .scene{left:90px;width:760px;top:230px}
+.kicker{font-family:"Space Mono",monospace;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.14em;font-size:28px;margin-bottom:22px}
+h1{font-family:Syne,sans-serif;font-weight:800;line-height:1.02;letter-spacing:-.01em}
+.v h1{font-size:88px}
+.h h1{font-size:80px}
+h1 .w{display:inline-block;will-change:transform,opacity}
+h1 em{font-style:normal;color:var(--accent)}
+.sub{color:var(--muted);line-height:1.32;margin-top:28px}
+.v .sub{font-size:38px}
+.h .sub{font-size:34px}
+.h .url{font-size:40px;margin-top:24px;padding:16px 38px}
+.h .facts{font-size:24px}
+.h .fine{margin-top:16px}
+.sub b{color:#fff;font-weight:600}
+
+/* Bildbühne (Illustration / Neigung / Marken) */
+.box{position:absolute;width:1000px;height:700px;overflow:hidden;-webkit-mask-image:linear-gradient(180deg,transparent 0,#000 7%,#000 93%,transparent 100%);mask-image:linear-gradient(180deg,transparent 0,#000 7%,#000 93%,transparent 100%)}
+.v .box{left:40px;top:740px}
+.h .box{left:890px;top:200px}
+.box > *{position:absolute;inset:0}
+svg{display:block;width:100%;height:100%;overflow:visible}
+
+/* Markenkacheln */
+.brands{display:grid;gap:22px;align-content:center}
+.v .brands{grid-template-columns:1fr 1fr;padding:0 40px}
+.h .brands{grid-template-columns:1fr 1fr;padding:30px 60px}
+.tile{border:2px solid var(--border);background:rgba(20,20,20,.85);border-radius:18px;height:112px;display:flex;align-items:center;justify-content:center;font-family:Syne,sans-serif;font-weight:800;font-size:32px;letter-spacing:.02em}
+.h .tile{height:104px}
+.tile.req{border-style:dashed;border-color:var(--accent);color:var(--accent);font-family:"Space Mono",monospace;font-size:26px;font-weight:700;letter-spacing:.04em;text-align:center;line-height:1.2}
+.brands .note{grid-column:1/-1;text-align:center;font-family:"Space Mono",monospace;font-size:28px;color:var(--muted);margin-top:8px}
+.brands .note b{color:#fff}
+
+/* Neigungs-Label */
+.deg{font-family:Syne,sans-serif;font-weight:800;font-size:140px;fill:#fff}
+
+/* CTA */
+.cta{position:absolute}
+.v .cta{left:70px;right:70px;top:1170px;text-align:center}
+.h .cta{left:90px;width:760px;top:690px}
+.price{font-family:Syne,sans-serif;font-weight:800;line-height:1}
+.v .price{font-size:132px}
+.h .price{font-size:104px}
+.price small{font-size:.38em;color:var(--muted);font-weight:700;margin-right:.18em}
+.facts{font-family:"Space Mono",monospace;font-size:28px;color:#fff;margin-top:18px;letter-spacing:.02em}
+.url{display:inline-block;white-space:nowrap;margin-top:34px;background:var(--accent);color:#fff;font-family:Syne,sans-serif;font-weight:800;font-size:46px;padding:20px 44px;border-radius:999px;box-shadow:0 10px 50px rgba(232,0,13,.45)}
+.fine{font-family:Inter,sans-serif;font-size:20px;color:#77777f;margin-top:26px}
+
+/* Fortschritt */
+.bar{position:absolute;left:0;height:6px;background:var(--accent)}
+.v .bar{bottom:0}
+.h .bar{bottom:0}
+</style>
+</head>
+<body>
+<div id="root">
+  <div class="bg">
+    <div class="spot s1"></div><div class="spot s2"></div>
+    <div class="beam" id="beam1"></div><div class="beam" id="beam2"></div>
+  </div>
+
+  <div class="brand"><i></i>Thorsten Hillmann <span>Keyboard-Sounds</span></div>
+
+  <!-- Szene 1: Hook -->
+  <div class="scene" data-a="0" data-b="3.3">
+    <div class="kicker">Live auf der Bühne</div>
+    <h1>Tablet auf dem <em>Keyboard?</em></h1>
+    <p class="sub">Rutscht. Wackelt. Liegt im Weg.</p>
+  </div>
+  <!-- Szene 2: Lösung -->
+  <div class="scene" data-a="3.3" data-b="6.7">
+    <div class="kicker">Die Lösung</div>
+    <h1>Ab in die <em>Halterung.</em></h1>
+    <p class="sub">Passgenau für dein Keyboard. <b>Gleiche Neigung wie das Bedienfeld</b> – fällt kaum auf.</p>
+  </div>
+  <!-- Szene 3: quer / hoch -->
+  <div class="scene" data-a="6.7" data-b="10.2">
+    <div class="kicker">Flexibel</div>
+    <h1><em>Quer</em> oder <em>hoch.</em></h1>
+    <p class="sub">Verstellbare Seitenteile. Für <b>iPad</b> und <b>Samsung Galaxy Tab</b>.</p>
+  </div>
+  <!-- Szene 4: Neigung -->
+  <div class="scene" data-a="10.2" data-b="13.1">
+    <div class="kicker">Dein Blickwinkel</div>
+    <h1><em>0°</em> oder <em>15°</em> Neigung.</h1>
+    <p class="sub">Flach wie das Bedienfeld – oder angewinkelt für den <b>besseren Blick</b>.</p>
+  </div>
+  <!-- Szene 5: Keyboards -->
+  <div class="scene" data-a="13.1" data-b="16.6">
+    <div class="kicker">Passend für</div>
+    <h1>Dein <em>Keyboard.</em></h1>
+    <p class="sub">Über <b>25 Modelle</b> von 8 Herstellern.</p>
+  </div>
+  <!-- Szene 6: Personalisierung -->
+  <div class="scene" data-a="16.6" data-b="20.0">
+    <div class="kicker">Personalisierbar</div>
+    <h1>Mit deinem <em>Namen.</em></h1>
+    <p class="sub">Oder dem Keyboard-Schriftzug. <b>Weitere Farben</b> auf Anfrage.</p>
+  </div>
+  <!-- Szene 7: CTA -->
+  <div class="scene" data-a="20.0" data-b="99">
+    <div class="kicker">Tablet-Halterung</div>
+    <h1>Dein Tablet. <em>Fest im Griff.</em></h1>
+    <p class="sub"><b>Im 3D-Druck gefertigt</b> – vom Keyboarder für Keyboarder.</p>
+  </div>
+
+  <div class="box">
+    <!-- Illustration: Draufsicht aus Spielerperspektive -->
+    <svg id="ill" viewBox="0 0 1000 700">
+      <defs>
+        <linearGradient id="gBody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#26262b"/><stop offset="1" stop-color="#151518"/></linearGradient>
+        <linearGradient id="gPanel" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2c2c32"/><stop offset="1" stop-color="#202025"/></linearGradient>
+        <linearGradient id="gScreen" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14161c"/><stop offset="1" stop-color="#0b0c10"/></linearGradient>
+        <linearGradient id="gWhite" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d9d9e0"/><stop offset=".85" stop-color="#f4f4f8"/><stop offset="1" stop-color="#c8c8d0"/></linearGradient>
+        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="10"/></filter>
+        <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity=".7"/></filter>
+      </defs>
+      <g id="cam">
+        <ellipse cx="500" cy="650" rx="520" ry="40" fill="#000" opacity=".6" filter="url(#glow)"/>
+        <!-- Keyboard -->
+        <rect x="20" y="250" width="960" height="380" rx="20" fill="url(#gBody)" stroke="#34343b" stroke-width="2"/>
+        <rect x="36" y="264" width="928" height="166" rx="10" fill="url(#gPanel)"/>
+        <g id="panel"></g>
+        <rect x="36" y="440" width="928" height="180" rx="6" fill="#0d0d0f"/>
+        <g id="keys"></g>
+        <!-- Halterung -->
+        <g id="holder" opacity="0">
+          <rect id="hGlow" x="250" y="250" width="300" height="200" rx="20" fill="#e8000d" opacity="0" filter="url(#glow)"/>
+          <rect id="hBase" x="270" y="266" width="260" height="166" rx="10" fill="#1e1e22" stroke="#45454e" stroke-width="2"/>
+          <rect id="hClampL" x="0" y="356" width="16" height="76" rx="5" fill="#1e1e22" stroke="#55555f" stroke-width="2"/>
+          <rect id="hClampR" x="0" y="356" width="16" height="76" rx="5" fill="#1e1e22" stroke="#55555f" stroke-width="2"/>
+        </g>
+        <!-- Tablet -->
+        <g id="tab" filter="url(#shadow)">
+          <rect x="-122" y="-87" width="244" height="174" rx="14" fill="#0c0c0e" stroke="#4a4a52" stroke-width="2.5"/>
+          <rect x="-113" y="-78" width="226" height="156" rx="6" fill="url(#gScreen)"/>
+          <!-- Querformat: Setliste -->
+          <g id="scrL" font-family="Inter, sans-serif">
+            <rect x="-113" y="-78" width="226" height="22" fill="#1b1d24"/>
+            <circle cx="-102" cy="-67" r="3.5" fill="#e8000d"/>
+            <text x="-94" y="-63" font-size="10" font-weight="800" fill="#fff" letter-spacing="1.2">SETLIST</text>
+            <text x="103" y="-63" font-size="8.5" fill="#8b8f9a" text-anchor="end">Stadtfest · Set 2</text>
+            <g id="setRows"></g>
+          </g>
+          <!-- Hochformat: Leadsheet -->
+          <g id="scrP" opacity="0" transform="rotate(-90)" font-family="Inter, sans-serif">
+            <text x="-68" y="-92" font-size="13" font-weight="800" fill="#fff">Jump</text>
+            <text x="-68" y="-79" font-size="8" fill="#8b8f9a">Van Halen · 130 BPM</text>
+            <rect x="-68" y="-71" width="136" height="16" rx="3" fill="#e8000d" opacity=".9"/>
+            <text x="-62" y="-60" font-size="8" font-weight="800" fill="#fff">SOUND: Synth Brass · Split C3</text>
+            <g id="chart"></g>
+          </g>
+        </g>
+        <!-- Schriftzug auf der Halterung (über dem Tablet-Rand) -->
+        <g id="lipG" opacity="0">
+          <rect id="hLip" x="260" y="424" width="280" height="26" rx="7" fill="#1e1e22" stroke="#55555f" stroke-width="2"/>
+          <text id="lipText" x="400" y="442" text-anchor="middle" font-family="Space Mono, monospace" font-weight="700" font-size="13" letter-spacing="3" fill="#fff"></text>
+        </g>
+      </g>
+    </svg>
+
+    <!-- Seitenansicht: Neigung -->
+    <svg id="angle" viewBox="0 0 1000 700" opacity="0">
+      <g transform="translate(0,30)">
+        <!-- Blick des Spielers -->
+        <g id="eye" transform="translate(110,170)">
+          <path d="M-34 0 Q0 -26 34 0 Q0 26 -34 0Z" fill="none" stroke="#fff" stroke-width="4"/>
+          <circle r="10" fill="#fff"/>
+        </g>
+        <line id="sight" x1="150" y1="180" x2="600" y2="380" stroke="#e8000d" stroke-width="3" stroke-dasharray="10 10" opacity=".9"/>
+        <!-- Keyboard im Profil -->
+        <path d="M150 560 L150 470 L420 470 L430 455 L860 420 L860 560 Z" fill="#202025" stroke="#3a3a42" stroke-width="3" stroke-linejoin="round"/>
+        <rect x="160" y="458" width="250" height="14" rx="3" fill="#e9e9ef"/>
+        <rect x="140" y="560" width="40" height="14" rx="3" fill="#2b2b30"/>
+        <rect x="830" y="560" width="40" height="14" rx="3" fill="#2b2b30"/>
+        <!-- Halterung + Tablet, Drehpunkt vorne auf dem Bedienfeld -->
+        <g transform="translate(470,451.7) rotate(-4.66)">
+          <path id="wedge" d="M0 0 L330 0 L330 0 Z" fill="#33333a" stroke="#55555f" stroke-width="2.5" stroke-linejoin="round"/>
+          <g id="tabSide">
+            <rect x="-4" y="-22" width="14" height="22" rx="3" fill="#33333a" stroke="#55555f" stroke-width="2.5"/>
+            <rect x="6" y="-14" width="320" height="12" rx="5" fill="#0c0c0e" stroke="#6a6a74" stroke-width="2.5"/>
+          </g>
+          <path id="arc" d="" fill="none" stroke="#e8000d" stroke-width="4"/>
+        </g>
+        <text id="degLbl" class="deg" x="880" y="250" text-anchor="end">0°</text>
+        <text x="880" y="300" text-anchor="end" font-family="Space Mono, monospace" font-size="26" fill="#a9a9b2" id="degSub">wie das Bedienfeld</text>
+      </g>
+    </svg>
+
+    <!-- Markenkacheln -->
+    <div class="brands" id="brands" style="opacity:0">
+      <div class="tile">YAMAHA</div><div class="tile">KORG</div>
+      <div class="tile">NORD</div><div class="tile">ROLAND</div>
+      <div class="tile">HAMMOND</div><div class="tile">ARTURIA</div>
+      <div class="tile">KURZWEIL</div><div class="tile">STUDIOLOGIC</div>
+      <div class="note">Modell nicht dabei? <b>Einfach anfragen.</b></div>
+    </div>
+  </div>
+
+  <div class="cta" id="cta" style="opacity:0">
+    <div class="price"><small>ab</small>32&nbsp;€</div>
+    <div class="facts">inkl. Versand* · Lieferung 3–7 Tage</div>
+    <div class="url">keyboard-sounds.com</div>
+    <div class="fine">*außer Schweiz. Abbildung schematisch.</div>
+  </div>
+
+  <div class="bar" id="bar"></div>
+</div>
+
+<script>
+const F = new URLSearchParams(location.search).get('f') === 'h' ? 'h' : 'v';
+document.documentElement.className = F;
+const isV = F === 'v';
+const DURATION = 25;
+window.DURATION = DURATION;
+
+// ---------- Helfer ----------
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const lerp = (a, b, x) => a + (b - a) * x;
+const eo = x => 1 - Math.pow(1 - x, 3);
+const ei = x => x * x * x;
+const eio = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const back = x => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+const $ = s => document.querySelector(s);
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent && parent.appendChild(e); return e; };
+
+// Keyframe-Interpolation: keys = [[t, ...werte]]
+function kf(keys, t, ease = eio) {
+  if (t <= keys[0][0]) return keys[0].slice(1);
+  for (let i = 0; i < keys.length - 1; i++) {
+    const [a, ...va] = keys[i], [b, ...vb] = keys[i + 1];
+    if (t <= b) { const x = ease(prog(t, a, b)); return va.map((v, j) => lerp(v, vb[j], x)); }
+  }
+  return keys[keys.length - 1].slice(1);
+}
+
+// ---------- Statischer Aufbau ----------
+// Tasten: 36 weiße Tasten (61er Tastatur), links Pitch/Mod-Räder
+(function buildKeys() {
+  const g = $('#keys');
+  el('rect', { x: 48, y: 456, width: 18, height: 120, rx: 8, fill: '#1c1c20', stroke: '#3a3a42' }, g);
+  el('rect', { x: 74, y: 456, width: 18, height: 120, rx: 8, fill: '#1c1c20', stroke: '#3a3a42' }, g);
+  const x0 = 104, w = 860 / 36;
+  for (let i = 0; i < 36; i++) el('rect', { x: x0 + i * w + .8, y: 444, width: w - 1.6, height: 172, rx: 3, fill: 'url(#gWhite)' }, g);
+  const blackAfter = [0, 1, 3, 4, 5];
+  for (let i = 0; i < 35; i++) if (blackAfter.includes(i % 7)) el('rect', { x: x0 + (i + 1) * w - 7.5, y: 444, width: 15, height: 104, rx: 2.5, fill: '#121214', stroke: '#000' }, g);
+})();
+// Bedienfeld: Regler, Fader, Display, Taster
+(function buildPanel() {
+  const g = $('#panel');
+  for (let r = 0; r < 2; r++) for (let c = 0; c < 4; c++) {
+    el('circle', { cx: 80 + c * 46, cy: 302 + r * 52, r: 15, fill: '#121215', stroke: '#45454e', 'stroke-width': 2 }, g);
+    el('line', { x1: 80 + c * 46, y1: 302 + r * 52, x2: 80 + c * 46 + 7, y2: 302 + r * 52 - 11, stroke: '#ddd', 'stroke-width': 2.5, 'stroke-linecap': 'round' }, g);
+  }
+  for (let c = 0; c < 8; c++) {
+    el('rect', { x: 600 + c * 18, y: 372, width: 4, height: 44, rx: 2, fill: '#0e0e10' }, g);
+    el('rect', { x: 594 + c * 18, y: 384 + (c * 7) % 22, width: 16, height: 9, rx: 2, fill: '#cfcfd6' }, g);
+  }
+  el('rect', { x: 600, y: 284, width: 210, height: 72, rx: 6, fill: '#0b1920', stroke: '#2b4450' }, g);
+  ['PERFORMANCE 012', 'Synth Brass  ·  Split'].forEach((s, i) => { const t = el('text', { x: 612, y: 310 + i * 22, 'font-family': 'Space Mono, monospace', 'font-size': 13, fill: i ? '#6fb6cf' : '#bfefff' }, g); t.textContent = s; });
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) el('rect', { x: 836 + c * 30, y: 288 + r * 40, width: 22, height: 14, rx: 3, fill: (r === 0 && c === 1) ? '#e8000d' : '#3a3a42' }, g);
+})();
+// Setliste & Leadsheet auf dem Tablet
+(function buildScreens() {
+  const songs = [['01', 'Jump', 'Van Halen'], ['02', 'Africa', 'Toto'], ['03', 'The Final Countdown', 'Europe'], ['04', 'Sweet Child O\' Mine', 'Guns N\' Roses'], ['05', 'Don\'t Stop Me Now', 'Queen']];
+  const g = $('#setRows');
+  songs.forEach((s, i) => {
+    const y = -48 + i * 25;
+    if (i === 0) el('rect', { x: -109, y: y - 2, width: 218, height: 22, rx: 4, fill: '#e8000d' }, g);
+    const a = el('text', { x: -102, y: y + 13, 'font-size': 9, 'font-family': 'Space Mono, monospace', fill: i ? '#6c707b' : '#fff' }, g); a.textContent = s[0];
+    const b = el('text', { x: -82, y: y + 13, 'font-size': 10.5, 'font-weight': 800, fill: '#fff' }, g); b.textContent = s[1];
+    const c = el('text', { x: 103, y: y + 13, 'font-size': 8.5, 'text-anchor': 'end', fill: i ? '#8b8f9a' : '#ffd9db' }, g); c.textContent = s[2];
+  });
+  const ch = $('#chart');
+  const bars = [['INTRO', 'G  D/F#', 'C  G', 'Am  D', 'G'], ['VERSE', 'G', 'C/G', 'G', 'D'], ['CHORUS', 'C', 'G', 'D', 'Em']];
+  bars.forEach((row, r) => {
+    const y = -40 + r * 52;
+    const l = el('text', { x: -68, y: y, 'font-size': 7.5, 'font-family': 'Space Mono, monospace', 'font-weight': 700, fill: '#e8000d' }, ch); l.textContent = row[0];
+    for (let k = 0; k < 4; k++) {
+      el('rect', { x: -68 + k * 34, y: y + 6, width: 32, height: 26, rx: 3, fill: '#1b1d24' }, ch);
+      const t = el('text', { x: -52 + k * 34, y: y + 23, 'font-size': 8.5, 'font-weight': 800, 'text-anchor': 'middle', fill: '#fff' }, ch); t.textContent = row[k + 1];
+    }
+  });
+})();
+// Überschriften in einzelne Wörter zerlegen
+document.querySelectorAll('.scene h1').forEach(h => {
+  const walk = n => [...n.childNodes].forEach(c => {
+    if (c.nodeType === 3) {
+      const frag = document.createDocumentFragment();
+      c.textContent.split(/(\s+)/).forEach(p => { if (!p) return; if (/^\s+$/.test(p)) frag.appendChild(document.createTextNode(p)); else { const s = document.createElement('span'); s.className = 'w'; s.textContent = p; frag.appendChild(s); } });
+      c.replaceWith(frag);
+    } else walk(c);
+  });
+  walk(h);
+});
+const scenes = [...document.querySelectorAll('.scene')].map(n => ({ n, a: +n.dataset.a, b: +n.dataset.b, words: [...n.querySelectorAll('.w')], kick: n.querySelector('.kicker'), sub: n.querySelector('.sub') }));
+const tiles = [...document.querySelectorAll('#brands .tile, #brands .note')];
+
+// ---------- Zeitachse ----------
+const HCX = 400, LIP = 430;           // Mitte der Halterung, Unterkante (Auflage)
+const HOLDER_COLORS = [[30, 30, 34], [190, 20, 28], [24, 70, 170], [222, 178, 20], [30, 30, 34]];
+
+function seek(t) {
+  // Hintergrund
+  $('#beam1').style.cssText = `left:${isV ? 180 : 1100}px;transform:rotate(${18 + Math.sin(t * .6) * 5}deg)`;
+  $('#beam2').style.cssText = `left:${isV ? 720 : 1650}px;transform:rotate(${-16 + Math.sin(t * .5 + 1) * 5}deg)`;
+
+  // Texte
+  for (const s of scenes) {
+    const vis = t >= s.a - .01 && t < s.b;
+    s.n.style.visibility = vis ? 'visible' : 'hidden';
+    if (!vis) continue;
+    const out = s.b > 90 ? 0 : eo(prog(t, s.b - .35, s.b));
+    s.n.style.opacity = 1 - out;
+    s.n.style.transform = `translateY(${-30 * out}px)`;
+    const k = eo(prog(t, s.a + .05, s.a + .5));
+    s.kick.style.opacity = k; s.kick.style.transform = `translateY(${(1 - k) * 20}px)`;
+    s.words.forEach((w, i) => { const x = eo(prog(t, s.a + .12 + i * .08, s.a + .62 + i * .08)); w.style.opacity = x; w.style.transform = `translateY(${(1 - x) * 60}px)`; });
+    if (s.sub) { const x = eo(prog(t, s.a + .55, s.a + 1.05)); s.sub.style.opacity = x; s.sub.style.transform = `translateY(${(1 - x) * 24}px)`; }
+  }
+
+  // Sichtbarkeit der Bildbühne
+  const illVis = (1 - eo(prog(t, 10.2, 10.5))) + eo(prog(t, 16.6, 16.95));
+  const angVis = eo(prog(t, 10.3, 10.65)) * (1 - eo(prog(t, 12.8, 13.1)));
+  const brVis = t >= 13.0 && t < 16.7 ? eo(prog(t, 13.0, 13.3)) * (1 - eo(prog(t, 16.3, 16.6))) : 0;
+  $('#ill').style.opacity = clamp(illVis);
+  $('#ill').style.transform = `scale(${lerp(.94, 1, clamp(illVis))})`;
+  $('#angle').style.opacity = angVis;
+  $('#brands').style.opacity = brVis;
+  tiles.forEach((n, i) => { const x = back(prog(t, 13.15 + i * .1, 13.55 + i * .1)); n.style.opacity = clamp(x * 1.2); n.style.transform = `scale(${lerp(.7, 1, x)})`; });
+
+  // Kamera [t, fokusX, fokusY, zoom]
+    const cam = kf([
+    [0, 500, 440, 1.0], [3.2, 470, 420, 1.12], [4.0, 410, 370, 1.4], [6.6, 400, 350, 1.45],
+    [7.0, 400, 330, 1.5], [10.2, 400, 330, 1.5],
+    [16.6, 400, 430, 2.7], [18.4, 400, 430, 2.7], [19.4, 400, 390, 1.9], [20.0, 400, 390, 1.9],
+    [21.0, 500, 440, isV ? .74 : .98], [25, 500, 440, isV ? .78 : 1.02]
+  ], t);
+  $('#cam').setAttribute('transform', `translate(500 ${isV ? lerp(350, 255, eio(prog(t, 20.0, 21.0))) : 350}) scale(${cam[2]}) translate(${-cam[0]} ${-cam[1]})`);
+
+  // Halterung erscheint (Szene 2)
+  const hIn = back(prog(t, 3.5, 4.2));
+  const hOp = clamp(prog(t, 3.5, 3.8));
+  const hS = lerp(1.15, 1, hIn);
+  $('#holder').setAttribute('opacity', hOp);
+  $('#holder').setAttribute('transform', `translate(${HCX} ${LIP}) scale(${hS}) translate(${-HCX} ${-LIP})`);
+  $('#lipG').setAttribute('opacity', hOp);
+  $('#lipG').setAttribute('transform', `translate(${HCX} ${LIP}) scale(${hS}) translate(${-HCX} ${-LIP})`);
+
+  // Tablet
+  let tx, ty, tr;
+  if (t < 3.9) {
+    // lose auf dem Bedienfeld, wackelt und rutscht Richtung Tasten
+    const slip = ei(prog(t, 1.5, 2.8));
+    tx = lerp(470, 560, slip) + Math.sin(t * 11) * 3 * (1 - slip);
+    ty = lerp(330, 470, slip) + Math.sin(t * 8.3) * 2 * (1 - slip);
+    tr = lerp(-7, 9, slip) + Math.sin(t * 6.1) * 2.2 * (1 - slip);
+    if (t > 2.8) { const b = prog(t, 2.8, 3.1); tr += Math.sin(b * Math.PI * 3) * 2 * (1 - b); }
+  } else {
+    const fly = eio(prog(t, 3.9, 4.75));
+    // Querformat-Mitte: (400, 343) – Hochformat-Mitte: (400, 308)
+    const rot = eio(prog(t, 7.2, 8.1)) - eio(prog(t, 9.2, 9.95));
+    tx = lerp(560, HCX, fly);
+    ty = lerp(470, lerp(LIP - 87, LIP - 122, rot), fly);
+    tr = lerp(9, 0, fly) + 90 * rot;
+  }
+  $('#tab').setAttribute('transform', `translate(${tx} ${ty}) rotate(${tr})`);
+  // Bildschirminhalt je nach Ausrichtung
+  const portrait = clamp((Math.abs(tr) - 35) / 25);
+  $('#scrL').setAttribute('opacity', 1 - portrait);
+  $('#scrP').setAttribute('opacity', portrait);
+
+  // Seitenteile: weit offen -> schnappen zu (Szene 2), folgen beim Drehen
+  const rotNow = t >= 3.9 ? (eio(prog(t, 7.2, 8.1)) - eio(prog(t, 9.2, 9.95))) : 0;
+  const half = lerp(122, 87, rotNow);
+  const open = 1 - back(prog(t, 4.7, 5.15));
+  const gap = half + 3 + 46 * clamp(open, -.2, 1);
+  $('#hClampL').setAttribute('x', HCX - gap - 16);
+  $('#hClampR').setAttribute('x', HCX + gap);
+  $('#hBase').setAttribute('x', HCX - half - 8); $('#hBase').setAttribute('width', 2 * half + 16);
+  $('#hBase').setAttribute('y', LIP - (rotNow > 0 ? lerp(174, 244, rotNow) : 174) - 4);
+  $('#hBase').setAttribute('height', (rotNow > 0 ? lerp(174, 244, rotNow) : 174) + 8);
+  const glow = Math.exp(-Math.pow((t - 5.1) / .25, 2)) + .7 * Math.exp(-Math.pow((t - 18.6) / .3, 2));
+  $('#hGlow').setAttribute('opacity', glow * .8);
+  $('#hGlow').setAttribute('x', HCX - half - 30); $('#hGlow').setAttribute('width', 2 * half + 60);
+
+  // Farbe & Schriftzug (Szene 6)
+  const cp = prog(t, 18.6, 19.8) * (HOLDER_COLORS.length - 1);
+  const ci = Math.min(HOLDER_COLORS.length - 2, Math.floor(cp)), cf = eio(clamp(cp - ci));
+  const col = HOLDER_COLORS[ci].map((v, j) => Math.round(lerp(v, HOLDER_COLORS[ci + 1][j], cf)));
+  const rgb = `rgb(${col})`;
+  ['#hBase', '#hClampL', '#hClampR', '#hLip'].forEach(s => $(s).setAttribute('fill', rgb));
+  const name = 'DEIN NAME';
+  const n = Math.floor(clamp(prog(t, 17.2, 18.3)) * name.length + .0001);
+  const caret = t > 17.0 && t < 18.7 && Math.floor(t * 4) % 2 === 0 ? '|' : '';
+  $('#lipText').textContent = t < 17.0 ? '' : name.slice(0, n) + caret;
+
+  // Neigung (Szene 4)
+  const ang = 15 * eio(prog(t, 11.35, 12.1));
+  $('#tabSide').setAttribute('transform', `rotate(${-ang} 6 -8)`);
+  const rad = ang * Math.PI / 180;
+  const ex = 6 + 300 * Math.cos(rad), ey = -8 - 300 * Math.sin(rad);
+  $('#wedge').setAttribute('d', ang > .3 ? `M6 0 L${ex.toFixed(1)} 0 L${ex.toFixed(1)} ${(ey + 4).toFixed(1)} Z` : 'M0 0 L0 0 Z');
+  const R = 120, ax = 6 + R * Math.cos(rad), ay = -8 - R * Math.sin(rad);
+  $('#arc').setAttribute('d', ang > .5 ? `M${6 + R} -8 A${R} ${R} 0 0 0 ${ax.toFixed(1)} ${ay.toFixed(1)}` : '');
+  $('#degLbl').textContent = Math.round(ang) + '°';
+  $('#degSub').textContent = ang < 7 ? 'wie das Bedienfeld' : 'angewinkelt';
+  $('#sight').setAttribute('x2', lerp(600, 610, ang / 15)); $('#sight').setAttribute('y2', lerp(392, 360, ang / 15));
+
+  // CTA
+  const c = eo(prog(t, 20.6, 21.2));
+  const cta = $('#cta');
+  cta.style.opacity = c; cta.style.transform = `translateY(${(1 - c) * 40}px)`;
+  const pulse = 1 + .035 * Math.max(0, Math.sin((t - 21.5) * 3.2)) * (t > 21.5 ? 1 : 0);
+  cta.querySelector('.url').style.transform = `scale(${pulse})`;
+
+  $('#bar').style.width = (100 * t / DURATION) + '%';
+}
+window.seek = seek;
+seek(0);
+if (new URLSearchParams(location.search).has('play')) {
+  const t0 = performance.now();
+  const loop = () => { seek(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+}
+window.ready = document.fonts.ready.then(() => true);
+</script>
+</body>
+</html>

@@ -7,6 +7,15 @@ Alle Fakten stammen aus den Shopify-Produktdaten (Stand 01.10.2026).
 |---|---|---|
 | `tablet-halterung-9x16.mp4` | 1080×1920 | Instagram Reels, YouTube Shorts, TikTok, Story-Ads |
 | `tablet-halterung-16x9.mp4` | 1920×1080 | YouTube, Shopify-Produktseite, Facebook |
+| `tablet-halterung-v2-9x16.mp4` | 1080×1920 | **v2 mit echtem Produkt-Rendering** (28 s), Reels/Shorts/TikTok |
+| `tablet-halterung-v2-16x9.mp4` | 1920×1080 | **v2 mit echtem Produkt-Rendering** (28 s), YouTube/Shop |
+
+## Version 2 (echtes Rendering)
+
+Basis ist `halterung-original.png`. `freistellen.py` stellt die schwarze Halterung vom Metallhintergrund frei
+(`halterung.png`) und erzeugt die Farbvarianten rot/blau/gelb. Ablauf: Hook (Illustration) → Reveal der echten
+Halterung → Zoom auf die verstellbaren Seitenteile → 0°/15° → Zoom auf die Füße („Modellgenau für dein Keyboard“)
+→ Hersteller → Farbwechsel → CTA. Neu rendern: `python3 freistellen.py && python3 musik.py v2 && node render.mjs v2`.
 
 ## Storyboard
 

@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Tablet-Halterung – Werbespot v2</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  Werbespot v2 "Tablet-Halterung" mit echtem Produkt-Rendering (halterung.png)
+  ?f=v  1080x1920 (Reels/Shorts/TikTok)   ?f=h  1920x1080 (YouTube/Shop)   ?play  Echtzeit-Vorschau
+  Rendern: node render.mjs v2
+-->
+<style>
+@font-face{font-family:Syne;font-weight:800;src:url(fonts/syne-latin-800-normal.woff2) format("woff2")}
+@font-face{font-family:"Space Mono";font-weight:400;src:url(fonts/space-mono-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:"Space Mono";font-weight:700;src:url(fonts/space-mono-latin-700-normal.woff2) format("woff2")}
+@font-face{font-family:Inter;font-weight:400;src:url(fonts/inter-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:Inter;font-weight:600;src:url(fonts/inter-latin-600-normal.woff2) format("woff2")}
+
+:root{--accent:#e8000d;--bg:#0a0a0a;--border:#2a2a2a;--text:#f0f0f0;--muted:#a9a9b2}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#000;overflow:hidden}
+#root{position:relative;overflow:hidden;background:var(--bg);color:var(--text);font-family:Inter,sans-serif}
+.v #root{width:1080px;height:1920px}
+.h #root{width:1920px;height:1080px}
+
+.bg{position:absolute;inset:0;pointer-events:none}
+.spot{position:absolute;border-radius:50%;filter:blur(40px)}
+.s1{background:radial-gradient(circle,rgba(232,0,13,.33),rgba(232,0,13,0) 65%)}
+.s2{background:radial-gradient(circle,rgba(255,255,255,.10),rgba(255,255,255,0) 60%)}
+.v .s1{width:1400px;height:1400px;left:-160px;top:420px}
+.v .s2{width:1100px;height:1100px;left:-10px;top:-450px}
+.h .s1{width:1500px;height:1500px;left:800px;top:-260px}
+.h .s2{width:1000px;height:1000px;left:-300px;top:-500px}
+.beam{position:absolute;top:-200px;width:260px;height:1700px;background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,0) 80%);transform-origin:50% 0;filter:blur(6px)}
+
+.brand{position:absolute;font-family:"Space Mono",monospace;font-weight:700;letter-spacing:.18em;text-transform:uppercase;font-size:22px;color:#fff;display:flex;align-items:center;gap:14px}
+.brand i{width:12px;height:12px;border-radius:50%;background:var(--accent);box-shadow:0 0 18px var(--accent)}
+.brand span{color:var(--muted);font-weight:400}
+.v .brand{left:0;right:0;justify-content:center;top:150px}
+.h .brand{left:90px;top:70px}
+
+.scene{position:absolute}
+.v .scene{left:70px;right:70px;top:290px;text-align:center}
+.h .scene{left:90px;width:760px;top:230px}
+.kicker{font-family:"Space Mono",monospace;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.14em;font-size:28px;margin-bottom:22px}
+h1{font-family:Syne,sans-serif;font-weight:800;line-height:1.02;letter-spacing:-.01em}
+.v h1{font-size:88px}
+.h h1{font-size:80px}
+h1 .w{display:inline-block}
+h1 em{font-style:normal;color:var(--accent)}
+.sub{color:var(--muted);line-height:1.32;margin-top:28px}
+.v .sub{font-size:38px}
+.h .sub{font-size:34px}
+.sub b{color:#fff;font-weight:600}
+
+.box{position:absolute;width:1000px;height:700px}
+.v .box{left:40px;top:740px}
+.h .box{left:890px;top:200px}
+.layer{position:absolute;inset:0}
+.clip{overflow:hidden;-webkit-mask-image:linear-gradient(180deg,transparent 0,#000 7%,#000 93%,transparent 100%)}
+svg{display:block;width:100%;height:100%;overflow:visible}
+
+/* Produkt */
+#prodGlow{position:absolute;left:50px;top:40px;width:900px;height:620px;border-radius:50%;
+  background:radial-gradient(ellipse at 50% 50%,rgba(150,152,165,.55),rgba(90,92,104,.25) 45%,rgba(40,40,48,0) 72%)}
+#prodCam{position:absolute;left:50px;top:28px;width:900px;height:643px;transform-origin:50% 50%}
+#prodCam img{position:absolute;inset:0;width:100%;height:100%}
+#prodCam .shadow{position:absolute;border-radius:50%;background:radial-gradient(ellipse,rgba(0,0,0,.75),rgba(0,0,0,0) 70%)}
+
+/* Callouts */
+.dot{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 6px rgba(232,0,13,.25),0 0 24px rgba(232,0,13,.9)}
+.dot::after{content:"";position:absolute;inset:9px;border-radius:50%;background:#fff}
+.ring{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;border:3px solid var(--accent)}
+.pill{position:absolute;white-space:nowrap;background:rgba(14,14,16,.92);border:2px solid var(--accent);color:#fff;border-radius:14px;padding:14px 22px;font-family:"Space Mono",monospace;font-weight:700;font-size:26px;display:flex;align-items:center;gap:16px;transform-origin:0 50%}
+.pill svg{width:44px;height:44px;flex:none}
+
+.brands{display:grid;gap:22px;align-content:center;grid-template-columns:1fr 1fr}
+.v .brands{padding:0 40px}
+.h .brands{padding:30px 60px}
+.tile{border:2px solid var(--border);background:rgba(20,20,20,.85);border-radius:18px;height:104px;display:flex;align-items:center;justify-content:center;font-family:Syne,sans-serif;font-weight:800;font-size:32px;letter-spacing:.02em}
+.brands .note{grid-column:1/-1;text-align:center;font-family:"Space Mono",monospace;font-size:28px;color:var(--muted);margin-top:8px}
+.brands .note b{color:#fff}
+.deg{font-family:Syne,sans-serif;font-weight:800;font-size:140px;fill:#fff}
+
+.swatches{position:absolute;display:flex;gap:18px;left:0;right:0;justify-content:center;bottom:6px}
+.sw{width:54px;height:54px;border-radius:50%;border:3px solid #333}
+.sw.on{border-color:#fff;box-shadow:0 0 0 4px rgba(255,255,255,.15)}
+
+.cta{position:absolute}
+.v .cta{left:70px;right:70px;top:1170px;text-align:center}
+.h .cta{left:90px;width:760px;top:690px}
+.price{font-family:Syne,sans-serif;font-weight:800;line-height:1}
+.v .price{font-size:132px}
+.h .price{font-size:104px}
+.price small{font-size:.38em;color:var(--muted);margin-right:.18em}
+.facts{font-family:"Space Mono",monospace;font-size:28px;color:#fff;margin-top:18px}
+.url{display:inline-block;white-space:nowrap;margin-top:34px;background:var(--accent);color:#fff;font-family:Syne,sans-serif;font-weight:800;font-size:46px;padding:20px 44px;border-radius:999px;box-shadow:0 10px 50px rgba(232,0,13,.45)}
+.fine{font-size:20px;color:#77777f;margin-top:26px}
+.h .facts{font-size:24px}
+.h .url{font-size:40px;margin-top:24px;padding:16px 38px}
+.h .fine{margin-top:16px}
+.bar{position:absolute;left:0;bottom:0;height:6px;background:var(--accent)}
+</style>
+</head>
+<body>
+<div id="root">
+  <div class="bg"><div class="spot s1"></div><div class="spot s2"></div><div class="beam" id="beam1"></div><div class="beam" id="beam2"></div></div>
+  <div class="brand"><i></i>Thorsten Hillmann <span>Keyboard-Sounds</span></div>
+
+  <div class="scene" data-a="0" data-b="3.3">
+    <div class="kicker">Live auf der Bühne</div>
+    <h1>Tablet auf dem <em>Keyboard?</em></h1>
+    <p class="sub">Rutscht. Wackelt. Liegt im Weg.</p>
+  </div>
+  <div class="scene" data-a="3.3" data-b="6.6">
+    <div class="kicker">Die Lösung</div>
+    <h1>Die Tablet-<em>Halterung.</em></h1>
+    <p class="sub"><b>Modellgenau konstruiert</b> für dein Keyboard.</p>
+  </div>
+  <div class="scene" data-a="6.6" data-b="9.9">
+    <div class="kicker">Flexibel</div>
+    <h1><em>Quer</em> oder <em>hoch.</em></h1>
+    <p class="sub">Für <b>iPad</b> und <b>Samsung Galaxy Tab</b>.</p>
+  </div>
+  <div class="scene" data-a="9.9" data-b="13.2">
+    <div class="kicker">Dein Blickwinkel</div>
+    <h1><em>0°</em> oder <em>15°</em> Neigung.</h1>
+    <p class="sub">Flach wie das Bedienfeld – oder angewinkelt für den <b>besseren Blick</b>.</p>
+  </div>
+  <div class="scene" data-a="13.2" data-b="16.5">
+    <div class="kicker">Unauffällig</div>
+    <h1>Fällt <em>kaum auf.</em></h1>
+    <p class="sub">Gleiche Neigung wie das Bedienfeld – <b>nichts steht im Sichtfeld</b>.</p>
+  </div>
+  <div class="scene" data-a="16.5" data-b="19.8">
+    <div class="kicker">Passend für</div>
+    <h1>Dein <em>Keyboard.</em></h1>
+    <p class="sub">Über <b>25 Modelle</b> von 8 Herstellern.</p>
+  </div>
+  <div class="scene" data-a="19.8" data-b="23.1">
+    <div class="kicker">Personalisierbar</div>
+    <h1>Deine <em>Farbe.</em> Dein <em>Name.</em></h1>
+    <p class="sub">Mit Namen oder Keyboard-Schriftzug. <b>Weitere Farben</b> auf Anfrage.</p>
+  </div>
+  <div class="scene" data-a="23.1" data-b="99">
+    <div class="kicker">Tablet-Halterung</div>
+    <h1>Dein Tablet. <em>Fest im Griff.</em></h1>
+    <p class="sub"><b>Im 3D-Druck gefertigt</b> – vom Keyboarder für Keyboarder.</p>
+  </div>
+
+  <div class="box">
+    <!-- Hook: Keyboard-Illustration mit losem Tablet -->
+    <svg id="ill" class="layer" viewBox="0 0 1000 700">
+      <defs>
+        <linearGradient id="gBody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#26262b"/><stop offset="1" stop-color="#151518"/></linearGradient>
+        <linearGradient id="gPanel" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2c2c32"/><stop offset="1" stop-color="#202025"/></linearGradient>
+        <linearGradient id="gScreen" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14161c"/><stop offset="1" stop-color="#0b0c10"/></linearGradient>
+        <linearGradient id="gWhite" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d9d9e0"/><stop offset=".85" stop-color="#f4f4f8"/><stop offset="1" stop-color="#c8c8d0"/></linearGradient>
+        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="10"/></filter>
+        <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity=".7"/></filter>
+      </defs>
+      <g id="cam">
+        <ellipse cx="500" cy="650" rx="520" ry="40" fill="#000" opacity=".6" filter="url(#glow)"/>
+        <rect x="20" y="250" width="960" height="380" rx="20" fill="url(#gBody)" stroke="#34343b" stroke-width="2"/>
+        <rect x="36" y="264" width="928" height="166" rx="10" fill="url(#gPanel)"/>
+        <g id="panel"></g>
+        <rect x="36" y="440" width="928" height="180" rx="6" fill="#0d0d0f"/>
+        <g id="keys"></g>
+        <g id="tab" filter="url(#shadow)">
+          <rect x="-122" y="-87" width="244" height="174" rx="14" fill="#0c0c0e" stroke="#4a4a52" stroke-width="2.5"/>
+          <rect x="-113" y="-78" width="226" height="156" rx="6" fill="url(#gScreen)"/>
+          <g font-family="Inter, sans-serif">
+            <rect x="-113" y="-78" width="226" height="22" fill="#1b1d24"/>
+            <circle cx="-102" cy="-67" r="3.5" fill="#e8000d"/>
+            <text x="-94" y="-63" font-size="10" font-weight="800" fill="#fff" letter-spacing="1.2">SETLIST</text>
+            <text x="103" y="-63" font-size="8.5" fill="#8b8f9a" text-anchor="end">Stadtfest · Set 2</text>
+            <g id="setRows"></g>
+          </g>
+        </g>
+      </g>
+    </svg>
+
+    <!-- Produkt (echtes Rendering) -->
+    <div id="prod" class="layer clip" style="opacity:0">
+      <div id="prodGlow"></div>
+      <div id="prodCam">
+        <div class="shadow" style="left:41%;top:89%;width:12%;height:7%"></div>
+        <div class="shadow" style="left:90%;top:80%;width:11%;height:7%"></div>
+        <div class="shadow" style="left:-1%;top:28%;width:10%;height:6%"></div>
+        <div class="shadow" style="left:46%;top:25%;width:14%;height:6%"></div>
+        <img id="pBlack" src="halterung.png" alt="">
+        <img id="pRot" src="halterung-rot.png" alt="" style="opacity:0">
+        <img id="pBlau" src="halterung-blau.png" alt="" style="opacity:0">
+        <img id="pGelb" src="halterung-gelb.png" alt="" style="opacity:0">
+      </div>
+      <svg id="leaders" class="layer" viewBox="0 0 1000 700"></svg>
+      <div id="callouts" class="layer"></div>
+      <div class="swatches" id="swatches" style="opacity:0">
+        <div class="sw" style="background:#1d1d20"></div><div class="sw" style="background:#cd161e"></div><div class="sw" style="background:#1e55c8"></div><div class="sw" style="background:#ebb919"></div>
+      </div>
+    </div>
+
+    <!-- Seitenansicht: Neigung -->
+    <svg id="angle" class="layer" viewBox="0 0 1000 700" style="opacity:0">
+      <g transform="translate(0,30)">
+        <g transform="translate(110,170)"><path d="M-34 0 Q0 -26 34 0 Q0 26 -34 0Z" fill="none" stroke="#fff" stroke-width="4"/><circle r="10" fill="#fff"/></g>
+        <line id="sight" x1="150" y1="180" x2="600" y2="380" stroke="#e8000d" stroke-width="3" stroke-dasharray="10 10" opacity=".9"/>
+        <path d="M150 560 L150 470 L420 470 L430 455 L860 420 L860 560 Z" fill="#202025" stroke="#3a3a42" stroke-width="3" stroke-linejoin="round"/>
+        <rect x="160" y="458" width="250" height="14" rx="3" fill="#e9e9ef"/>
+        <rect x="140" y="560" width="40" height="14" rx="3" fill="#2b2b30"/>
+        <rect x="830" y="560" width="40" height="14" rx="3" fill="#2b2b30"/>
+        <g transform="translate(470,451.7) rotate(-4.66)">
+          <path id="wedge" d="M0 0 L0 0 Z" fill="#33333a" stroke="#55555f" stroke-width="2.5" stroke-linejoin="round"/>
+          <g id="tabSide">
+            <rect x="-4" y="-22" width="14" height="22" rx="3" fill="#33333a" stroke="#55555f" stroke-width="2.5"/>
+            <rect x="6" y="-14" width="320" height="12" rx="5" fill="#0c0c0e" stroke="#6a6a74" stroke-width="2.5"/>
+          </g>
+          <path id="arc" d="" fill="none" stroke="#e8000d" stroke-width="4"/>
+        </g>
+        <text id="degLbl" class="deg" x="880" y="250" text-anchor="end">0°</text>
+        <text id="degSub" x="880" y="300" text-anchor="end" font-family="Space Mono, monospace" font-size="26" fill="#a9a9b2">wie das Bedienfeld</text>
+      </g>
+    </svg>
+
+    <div class="layer brands" id="brands" style="opacity:0">
+      <div class="tile">YAMAHA</div><div class="tile">KORG</div>
+      <div class="tile">NORD</div><div class="tile">ROLAND</div>
+      <div class="tile">HAMMOND</div><div class="tile">ARTURIA</div>
+      <div class="tile">KURZWEIL</div><div class="tile">STUDIOLOGIC</div>
+      <div class="note">Modell nicht dabei? <b>Einfach anfragen.</b></div>
+    </div>
+  </div>
+
+  <div class="cta" id="cta" style="opacity:0">
+    <div class="price"><small>ab</small>32&nbsp;€</div>
+    <div class="facts">inkl. Versand* · Lieferung 3–7 Tage</div>
+    <div class="url">keyboard-sounds.com</div>
+    <div class="fine">*außer Schweiz. Abbildung: Beispielmodell.</div>
+  </div>
+  <div class="bar" id="bar"></div>
+</div>
+
+<script>
+const F = new URLSearchParams(location.search).get('f') === 'h' ? 'h' : 'v';
+document.documentElement.className = F;
+const isV = F === 'v';
+const DURATION = 28;
+window.DURATION = DURATION;
+
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const lerp = (a, b, x) => a + (b - a) * x;
+const eo = x => 1 - Math.pow(1 - x, 3);
+const ei = x => x * x * x;
+const eio = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const back = x => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+const $ = s => document.querySelector(s);
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent && parent.appendChild(e); return e; };
+const fade = (t, a, b, inD = .35, outD = .35) => eo(prog(t, a, a + inD)) * (1 - eo(prog(t, b - outD, b)));
+function kf(keys, t, ease = eio) {
+  if (t <= keys[0][0]) return keys[0].slice(1);
+  for (let i = 0; i < keys.length - 1; i++) {
+    const [a, ...va] = keys[i], [b, ...vb] = keys[i + 1];
+    if (t <= b) { const x = ease(prog(t, a, b)); return va.map((v, j) => lerp(v, vb[j], x)); }
+  }
+  return keys[keys.length - 1].slice(1);
+}
+
+// ---------- Keyboard-Illustration (nur Hook) ----------
+(function () {
+  const g = $('#keys');
+  el('rect', { x: 48, y: 456, width: 18, height: 120, rx: 8, fill: '#1c1c20', stroke: '#3a3a42' }, g);
+  el('rect', { x: 74, y: 456, width: 18, height: 120, rx: 8, fill: '#1c1c20', stroke: '#3a3a42' }, g);
+  const x0 = 104, w = 860 / 36;
+  for (let i = 0; i < 36; i++) el('rect', { x: x0 + i * w + .8, y: 444, width: w - 1.6, height: 172, rx: 3, fill: 'url(#gWhite)' }, g);
+  for (let i = 0; i < 35; i++) if ([0, 1, 3, 4, 5].includes(i % 7)) el('rect', { x: x0 + (i + 1) * w - 7.5, y: 444, width: 15, height: 104, rx: 2.5, fill: '#121214', stroke: '#000' }, g);
+  const p = $('#panel');
+  for (let r = 0; r < 2; r++) for (let c = 0; c < 4; c++) {
+    el('circle', { cx: 80 + c * 46, cy: 302 + r * 52, r: 15, fill: '#121215', stroke: '#45454e', 'stroke-width': 2 }, p);
+    el('line', { x1: 80 + c * 46, y1: 302 + r * 52, x2: 87 + c * 46, y2: 291 + r * 52, stroke: '#ddd', 'stroke-width': 2.5, 'stroke-linecap': 'round' }, p);
+  }
+  for (let c = 0; c < 8; c++) { el('rect', { x: 600 + c * 18, y: 372, width: 4, height: 44, rx: 2, fill: '#0e0e10' }, p); el('rect', { x: 594 + c * 18, y: 384 + (c * 7) % 22, width: 16, height: 9, rx: 2, fill: '#cfcfd6' }, p); }
+  el('rect', { x: 600, y: 284, width: 210, height: 72, rx: 6, fill: '#0b1920', stroke: '#2b4450' }, p);
+  ['PERFORMANCE 012', 'Synth Brass  ·  Split'].forEach((s, i) => { el('text', { x: 612, y: 310 + i * 22, 'font-family': 'Space Mono, monospace', 'font-size': 13, fill: i ? '#6fb6cf' : '#bfefff' }, p).textContent = s; });
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) el('rect', { x: 836 + c * 30, y: 288 + r * 40, width: 22, height: 14, rx: 3, fill: (r === 0 && c === 1) ? '#e8000d' : '#3a3a42' }, p);
+  const songs = [['01', 'Jump', 'Van Halen'], ['02', 'Africa', 'Toto'], ['03', 'The Final Countdown', 'Europe'], ['04', 'Sweet Child O\' Mine', 'Guns N\' Roses'], ['05', 'Don\'t Stop Me Now', 'Queen']];
+  const sr = $('#setRows');
+  songs.forEach((s, i) => {
+    const y = -48 + i * 25;
+    if (i === 0) el('rect', { x: -109, y: y - 2, width: 218, height: 22, rx: 4, fill: '#e8000d' }, sr);
+    el('text', { x: -102, y: y + 13, 'font-size': 9, 'font-family': 'Space Mono, monospace', fill: i ? '#6c707b' : '#fff' }, sr).textContent = s[0];
+    el('text', { x: -82, y: y + 13, 'font-size': 10.5, 'font-weight': 800, fill: '#fff' }, sr).textContent = s[1];
+    el('text', { x: 103, y: y + 13, 'font-size': 8.5, 'text-anchor': 'end', fill: i ? '#8b8f9a' : '#ffd9db' }, sr).textContent = s[2];
+  });
+})();
+
+// Überschriften wortweise
+document.querySelectorAll('.scene h1').forEach(h => {
+  const walk = n => [...n.childNodes].forEach(c => {
+    if (c.nodeType === 3) {
+      const frag = document.createDocumentFragment();
+      c.textContent.split(/(\s+)/).forEach(p => { if (!p) return; if (/^\s+$/.test(p)) frag.appendChild(document.createTextNode(p)); else { const s = document.createElement('span'); s.className = 'w'; s.textContent = p; frag.appendChild(s); } });
+      c.replaceWith(frag);
+    } else walk(c);
+  });
+  walk(h);
+});
+const scenes = [...document.querySelectorAll('.scene')].map(n => ({ n, a: +n.dataset.a, b: +n.dataset.b, words: [...n.querySelectorAll('.w')], kick: n.querySelector('.kicker'), sub: n.querySelector('.sub') }));
+const tiles = [...document.querySelectorAll('#brands .tile, #brands .note')];
+
+// ---------- Callouts auf dem Produkt ----------
+// Punkte in normierten Bildkoordinaten (0..1) von halterung.png
+const PW = 900, PH = 643, PX = 50, PY = 28;   // Lage von #prodCam in der Box
+const TABLET_ICON = '<svg viewBox="0 0 44 44"><g id="ICON"><rect x="6" y="11" width="32" height="22" rx="4" fill="none" stroke="#fff" stroke-width="3"/><circle cx="34" cy="22" r="1.6" fill="#fff"/></g></svg>';
+const CALLOUTS = [
+  { a: 7.0, b: 9.75, pts: [[0.06, 0.19], [0.757, 0.10]], label: 'Verstellbare Seitenteile', icon: true, lx: .5, ly: .52 },
+  { a: 3.9, b: 6.45, pts: [[0.31, 0.47]], label: 'Im 3D-Druck gefertigt', lx: .14, ly: .78 },
+  { a: 13.6, b: 16.35, pts: [[0.483, 0.88], [0.965, 0.79]], label: 'Modellgenau für dein Keyboard', lx: .5, ly: .2 },
+];
+const coLayer = $('#callouts'), leaders = $('#leaders');
+CALLOUTS.forEach(c => {
+  c.dots = c.pts.map(() => { const d = document.createElement('div'); d.className = 'dot'; coLayer.appendChild(d); const r = document.createElement('div'); r.className = 'ring'; coLayer.appendChild(r); return [d, r]; });
+  c.lines = c.pts.map(() => el('line', { stroke: '#e8000d', 'stroke-width': 3 }, leaders));
+  c.pill = document.createElement('div'); c.pill.className = 'pill';
+  c.pill.innerHTML = (c.icon ? TABLET_ICON : '') + '<span>' + c.label + '</span>';
+  coLayer.appendChild(c.pill);
+});
+
+// Kamera auf dem Produkt [t, fokusX, fokusY, zoom]
+const PCAM = [
+  [3.3, .5, .5, .88], [6.4, .5, .5, 1.0],
+  [6.9, .41, .2, 1.32], [9.7, .42, .22, 1.38],
+  [13.2, .7, .76, 1.45], [16.3, .7, .74, 1.52],
+  [19.8, .5, .5, .95], [23.0, .5, .5, 1.02],
+  [23.9, .5, .5, isV ? .62 : .82], [28, .5, .5, isV ? .66 : .86],
+];
+function toBox(px, py, cam) {
+  const [fx, fy, z] = cam;
+  return [500 + (px - fx) * PW * z, (PY + PH / 2) + (py - fy) * PH * z];
+}
+
+function seek(t) {
+  $('#beam1').style.cssText = `left:${isV ? 180 : 1100}px;transform:rotate(${18 + Math.sin(t * .6) * 5}deg)`;
+  $('#beam2').style.cssText = `left:${isV ? 720 : 1650}px;transform:rotate(${-16 + Math.sin(t * .5 + 1) * 5}deg)`;
+
+  for (const s of scenes) {
+    const vis = t >= s.a - .01 && t < s.b;
+    s.n.style.visibility = vis ? 'visible' : 'hidden';
+    if (!vis) continue;
+    const out = s.b > 90 ? 0 : eo(prog(t, s.b - .35, s.b));
+    s.n.style.opacity = 1 - out;
+    s.n.style.transform = `translateY(${-30 * out}px)`;
+    const k = eo(prog(t, s.a + .05, s.a + .5));
+    s.kick.style.opacity = k; s.kick.style.transform = `translateY(${(1 - k) * 20}px)`;
+    s.words.forEach((w, i) => { const x = eo(prog(t, s.a + .12 + i * .08, s.a + .62 + i * .08)); w.style.opacity = x; w.style.transform = `translateY(${(1 - x) * 60}px)`; });
+    if (s.sub) { const x = eo(prog(t, s.a + .55, s.a + 1.05)); s.sub.style.opacity = x; s.sub.style.transform = `translateY(${(1 - x) * 24}px)`; }
+  }
+
+  // Ebenen
+  const illOp = 1 - eo(prog(t, 3.0, 3.5));
+  $('#ill').style.opacity = illOp;
+  $('#ill').style.transform = `scale(${lerp(1, .9, eo(prog(t, 3.0, 3.5)))})`;
+  const prodOp = fade(t, 3.3, 9.95, .5) + fade(t, 13.1, 16.6) + fade(t, 19.7, 99);
+  const prod = $('#prod');
+  prod.style.opacity = clamp(prodOp);
+  // Am Ende (CTA) im Hochformat nach oben schieben, damit Preis & URL Platz haben
+  const up = eo(prog(t, 23.1, 24.0));
+  prod.style.transform = `translateY(${(isV ? -150 : -40) * up}px)`;
+  $('#angle').style.opacity = fade(t, 9.95, 13.2);
+  $('#brands').style.opacity = fade(t, 16.5, 19.8, .3, .3);
+  tiles.forEach((n, i) => { const x = back(prog(t, 16.65 + i * .1, 17.05 + i * .1)); n.style.opacity = clamp(x * 1.2); n.style.transform = `scale(${lerp(.7, 1, x)})`; });
+
+  // Hook: Tablet rutscht
+  const slip = ei(prog(t, 1.5, 2.8));
+  let tx = lerp(470, 560, slip) + Math.sin(t * 11) * 3 * (1 - slip);
+  let ty = lerp(330, 470, slip) + Math.sin(t * 8.3) * 2 * (1 - slip);
+  let tr = lerp(-7, 9, slip) + Math.sin(t * 6.1) * 2.2 * (1 - slip);
+  if (t > 2.8) { const b = prog(t, 2.8, 3.1); tr += Math.sin(b * Math.PI * 3) * 2 * (1 - b); }
+  $('#tab').setAttribute('transform', `translate(${tx} ${ty}) rotate(${tr})`);
+  const cz = lerp(1, 1.12, eio(prog(t, 0, 3.2)));
+  $('#cam').setAttribute('transform', `translate(500 350) scale(${cz}) translate(-500 -440)`);
+
+  // Produkt-Reveal & Kamera
+  const cam = kf(PCAM, t);
+  const [fx, fy, z] = cam;
+  const rev = eo(prog(t, 3.3, 4.3));
+  const pc = $('#prodCam');
+  pc.style.transform = `translate(${-(fx - .5) * PW * z}px, ${-(fy - .5) * PH * z + (1 - rev) * 60}px) scale(${z})`;
+  const flash = Math.exp(-Math.pow((t - 3.9) / .35, 2));
+  const rim = .35 + .65 * flash;
+  pc.querySelectorAll('img').forEach(i => i.style.filter = `brightness(${1 + 1.1 * flash}) drop-shadow(0 0 ${10 + 20 * flash}px rgba(232,0,13,${rim}))`);
+  $('#prodGlow').style.transform = `scale(${lerp(.6, 1, rev)})`;
+  $('#prodGlow').style.opacity = rev;
+
+  // Farbwechsel (Szene 7)
+  const colors = ['#pRot', '#pBlau', '#pGelb'];
+  const cs = [[20.6, 21.3], [21.3, 22.0], [22.0, 22.7]];
+  colors.forEach((id, i) => {
+    const [a, b] = cs[i];
+    $(id).style.opacity = eio(prog(t, a - .25, a)) * (1 - eio(prog(t, b - .25, b)));
+  });
+  const sw = fade(t, 20.2, 23.0);
+  $('#swatches').style.opacity = sw;
+  const active = t < 20.6 - .12 ? 0 : t < 21.3 - .12 ? 1 : t < 22.0 - .12 ? 2 : t < 22.7 - .12 ? 3 : 0;
+  document.querySelectorAll('.sw').forEach((n, i) => n.classList.toggle('on', i === active));
+
+  // Callouts
+  CALLOUTS.forEach(c => {
+    const vis = fade(t, c.a, c.b, .4, .3);
+    const lp = [500 + (c.lx - .5) * 1000 * .72, 700 * c.ly];
+    c.pts.forEach((p, i) => {
+      const [x, y] = toBox(p[0], p[1], cam);
+      const pop = back(prog(t, c.a + i * .12, c.a + .45 + i * .12));
+      const [d, r] = c.dots[i];
+      d.style.left = x + 'px'; d.style.top = y + 'px'; d.style.opacity = vis; d.style.transform = `scale(${pop})`;
+      const ph = ((t - c.a) * 1.2) % 1;
+      r.style.left = x + 'px'; r.style.top = y + 'px'; r.style.opacity = vis * (1 - ph); r.style.transform = `scale(${1 + ph * 1.8})`;
+      const ln = c.lines[i];
+      const draw = eo(prog(t, c.a + .3, c.a + .8));
+      ln.setAttribute('x1', x); ln.setAttribute('y1', y);
+      ln.setAttribute('x2', lerp(x, lp[0], draw)); ln.setAttribute('y2', lerp(y, lp[1], draw));
+      ln.setAttribute('opacity', vis);
+    });
+    const pp = back(prog(t, c.a + .6, c.a + 1.0));
+    c.pill.style.opacity = vis * clamp(pp * 1.3);
+    const pw = c.pill.offsetWidth, ph2 = c.pill.offsetHeight;
+    c.pill.style.left = clamp(lp[0] - pw / 2, 10, 990 - pw) + 'px';
+    c.pill.style.top = (lp[1] - ph2 / 2) + 'px';
+    c.pill.style.transform = `scale(${lerp(.8, 1, clamp(pp))})`;
+    if (c.icon) {
+      const rot = 90 * (eio(prog(t, c.a + 1.0, c.a + 1.5)) - eio(prog(t, c.a + 2.0, c.a + 2.5)));
+      c.pill.querySelector('#ICON').setAttribute('transform', `rotate(${rot} 22 22)`);
+    }
+  });
+
+  // Neigung
+  const ang = 15 * eio(prog(t, 11.05, 11.8));
+  $('#tabSide').setAttribute('transform', `rotate(${-ang} 6 -8)`);
+  const rad = ang * Math.PI / 180;
+  const ex = 6 + 300 * Math.cos(rad), ey = -8 - 300 * Math.sin(rad);
+  $('#wedge').setAttribute('d', ang > .3 ? `M6 0 L${ex.toFixed(1)} 0 L${ex.toFixed(1)} ${(ey + 4).toFixed(1)} Z` : 'M0 0 L0 0 Z');
+  const R = 120, ax = 6 + R * Math.cos(rad), ay = -8 - R * Math.sin(rad);
+  $('#arc').setAttribute('d', ang > .5 ? `M${6 + R} -8 A${R} ${R} 0 0 0 ${ax.toFixed(1)} ${ay.toFixed(1)}` : '');
+  $('#degLbl').textContent = Math.round(ang) + '°';
+  $('#degSub').textContent = ang < 7 ? 'wie das Bedienfeld' : 'angewinkelt';
+  $('#sight').setAttribute('x2', lerp(600, 610, ang / 15)); $('#sight').setAttribute('y2', lerp(392, 360, ang / 15));
+
+  // CTA
+  const c = eo(prog(t, 23.7, 24.3));
+  const cta = $('#cta');
+  cta.style.opacity = c; cta.style.transform = `translateY(${(1 - c) * 40}px)`;
+  cta.querySelector('.url').style.transform = `scale(${1 + .035 * Math.max(0, Math.sin((t - 24.6) * 3.2)) * (t > 24.6 ? 1 : 0)})`;
+  $('#bar').style.width = (100 * t / DURATION) + '%';
+}
+window.seek = seek;
+const imgs = [...document.images].map(i => i.decode().catch(() => {}));
+window.ready = Promise.all([document.fonts.ready, ...imgs]).then(() => { seek(0); return true; });
+if (new URLSearchParams(location.search).has('play')) {
+  window.ready.then(() => { const t0 = performance.now(); const loop = () => { seek(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(loop); }; requestAnimationFrame(loop); });
+}
+</script>
+</body>
+</html>

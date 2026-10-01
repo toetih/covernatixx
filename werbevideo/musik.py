@@ -9,10 +9,13 @@ Markenwerbung für deine Sounds gleich mit. Einfach musik.wav ersetzen und neu r
 """
 import numpy as np
 from scipy.signal import lfilter, butter
+import sys
 import wave
 
+V2 = len(sys.argv) > 1 and sys.argv[1] == 'v2'   # v2: 28 s, eine Szene mehr
+
 SR = 44100
-DUR = 25.0
+DUR = 28.0 if V2 else 25.0
 N = int(SR * DUR)
 BEAT = 60 / 145.45          # ~0,4125 s, 2 Takte = 3,3 s
 rng = np.random.default_rng(7)
@@ -135,7 +138,7 @@ def hat(length=0.05):
 
 
 K, C = kick(), clap()
-DRUM_START, DRUM_END = SEG, 23.1
+DRUM_START, DRUM_END = SEG, (26.4 if V2 else 23.1)
 beats = int(DUR / BEAT) + 1
 for i in range(beats):
     tb = i * BEAT
@@ -164,8 +167,9 @@ add(K * 1.0, SEG, gain=0.4)
 n = int(0.08 * SR)
 t = np.arange(n) / SR
 click = (highpass(rng.standard_normal(n), 3000) * np.exp(-t * 120) + 0.6 * np.sin(2 * np.pi * 2100 * t) * np.exp(-t * 90))
-add(click, 5.05, gain=0.5)
-add(click, 5.11, gain=0.3)
+for tc in ([7.4, 13.6] if V2 else [5.05]):   # v2: Callouts erscheinen
+    add(click, tc, gain=0.5)
+    add(click, tc + 0.06, gain=0.3)
 
 # --- Mix -----------------------------------------------------------------
 mix = np.stack([L, R], axis=1)
@@ -179,9 +183,9 @@ mix = np.tanh(mix * 1.4) / np.tanh(1.4)       # sanfte Sättigung
 mix /= np.max(np.abs(mix)) / 0.89             # Peak ~ -1 dBFS
 
 pcm = (mix * 32767).astype('<i2')
-with wave.open('musik.wav', 'wb') as w:
+with wave.open('musik-v2.wav' if V2 else 'musik.wav', 'wb') as w:
     w.setnchannels(2)
     w.setsampwidth(2)
     w.setframerate(SR)
     w.writeframes(pcm.tobytes())
-print('musik.wav geschrieben', DUR, 's')
+print('Musik geschrieben', DUR, 's')

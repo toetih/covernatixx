@@ -407,3 +407,67 @@ test('Kategorie-Verwendung: Buchungen, Regeln, Daueraufträge, Kredit, Budget', 
   assert.equal(u.m3.used, false);
   assert.equal(u.s5.used, false);
 });
+
+test('Regeln: Vergleich unabhängig von Satzzeichen und Groß/klein', () => {
+  const rules = [{ pattern: 'dm drogerie', categoryId: 'dro', field: 'any' }, { pattern: 'Stadtwerke', categoryId: 'strom', field: 'payee' }];
+  assert.equal(C.applyRules(rules, 'DM-Drogerie Markt sagt Danke', ''), 'dro');
+  assert.equal(C.applyRules(rules, 'STADTWERKE Musterstadt GmbH', ''), 'strom');
+  assert.equal(C.applyRules(rules, 'Bäcker', 'stadtwerke'), null); // field payee
+});
+
+test('Lernschlüssel und lernbare Regeln', () => {
+  assert.equal(C.learnKey('REWE Markt GmbH 1234 Köln'), 'rewe');
+  assert.equal(C.learnKey('Aral Station 0815'), 'aral');
+  assert.equal(C.learnKey('Deutsche Bahn AG'), 'deutsche bahn');
+  assert.equal(C.learnKey('dm-drogerie markt sagt Danke'), 'dm drogerie');
+  assert.equal(C.learnKey('PayPal (Europe) S.a.r.l. et Cie'), null);
+  assert.equal(C.learnKey('12345'), null);
+  const s = baseState();
+  const add = (id, payee, cat) => s.transactions.push({ id, date: '2025-01-0' + id.length, accountId: 'giro', amount: -1000, payee, categoryId: cat, tags: [] });
+  add('a', 'REWE Markt GmbH 1234', 'food');
+  add('b', 'REWE MARKT GMBH 9876', 'food');
+  add('c', 'Aral Tankstelle 1', 'fuel');            // nur einmal → nicht lernen
+  add('d', 'Thomann GmbH', 'hobby');
+  add('e', 'Thomann GmbH', 'gift');                 // widersprüchlich → nicht lernen
+  s.categories.push({ id: 'food', name: 'Lebensmittel', type: 'expense' }, { id: 'fuel', name: 'Tanken', type: 'expense' }, { id: 'hobby', name: 'Hobby', type: 'expense' }, { id: 'gift', name: 'Geschenke', type: 'expense' });
+  let l = C.learnableRules(s);
+  assert.equal(l.length, 1);
+  assert.deepEqual([l[0].pattern, l[0].categoryId, l[0].count], ['rewe', 'food', 2]);
+  assert.equal(C.learnableRules(s, ['c']).length, 0);
+  s.rules.push({ pattern: l[0].pattern, categoryId: 'food', field: 'payee' });
+  assert.equal(C.learnableRules(s).length, 0);   // greift schon
+  assert.equal(C.applyRules(s.rules, 'REWE Markt 5555 Bonn', ''), 'food');
+  s.rules[0].learned = true;
+  assert.equal(C.applyRules(s.rules, 'Brewery Bar', ''), null);   // gelernt: nur am Wortanfang
+  assert.equal(C.applyRules(s.rules, 'Kauf bei REWE City', ''), 'food');
+});
+
+test('Offene Buchungen gruppiert mit Vorschlag', () => {
+  const s = baseState();
+  s.categories.push({ id: 'food', name: 'Lebensmittel', type: 'expense' });
+  s.transactions.push({ id: 'k', date: '2025-01-01', accountId: 'giro', amount: -500, payee: 'REWE Markt 1', categoryId: 'food', tags: [] });
+  ['2025-02-01', '2025-02-08', '2025-02-15'].forEach((d, i) => s.transactions.push({ id: 'r' + i, date: d, accountId: 'giro', amount: -1000, payee: 'REWE Markt ' + (100 + i), categoryId: null, tags: [] }));
+  s.transactions.push({ id: 'x', date: '2025-02-03', accountId: 'giro', amount: -2000, payee: 'Unbekannt', categoryId: null, tags: [] });
+  s.transactions.push({ id: 'u', date: '2025-02-03', accountId: 'giro', counterAccountId: 'tg', amount: -2000, payee: 'Umbuchung', tags: [] });
+  s.transactions.push({ id: 'z', date: '2025-02-04', accountId: 'giro', amount: 300, payee: 'REWE Markt 1', categoryId: null, tags: [] }); // Erstattung: eigene Gruppe
+  const g = C.uncategorizedGroups(s);
+  assert.equal(g.length, 3);
+  assert.equal(g[0].label.startsWith('REWE'), true);
+  assert.equal(g[0].count, 3);
+  assert.equal(g[0].sum, -3000);
+  assert.equal(g[0].suggestion, 'food');
+  assert.equal(g.find(x => x.type === 'income').suggestion, null); // Einnahme ≠ Ausgabe-Kategorie
+  assert.equal(C.uncategorizedGroups(s, { from: '2025-02-10' }).length, 1);
+});
+
+test('Import-Profil erkennt Bankformat trotz wechselndem Vorspann', () => {
+  const s = baseState();
+  const header = ['Buchungstag', 'Valuta', 'Auftraggeber / Begünstigter', 'Verwendungszweck', 'Betrag (EUR)'];
+  s.importProfiles.push({ id: 'p', name: 'Sparkasse', kind: 'tx', delim: ';', signature: C.headerSignature(header) });
+  const text = 'Umsätze Girokonto;;\nZeitraum: 01.10.2025 - 31.10.2025;;\n\n' + header.join(';') + '\n01.10.2025;01.10.2025;REWE;Einkauf;-12,00\n';
+  const m = C.findImportProfile(s, text, 'tx');
+  assert.equal(m.profile.id, 'p');
+  assert.equal(m.header, 2); // Leerzeilen werden beim Einlesen übersprungen
+  assert.equal(C.findImportProfile(s, 'Datum;Betrag\n01.01.2025;1', 'tx'), null);
+  assert.equal(C.findImportProfile(s, text, 'depot'), null);
+});

@@ -96,11 +96,13 @@
     var root = $('#toast-root');
     var el = document.createElement('div');
     el.className = 'toast' + (opts.error ? ' err' : '');
-    el.innerHTML = '<span>' + esc(msg) + '</span>' + (opts.undo ? '<button type="button">Rückgängig</button>' : '');
-    if (opts.undo) el.querySelector('button').onclick = function () { el.remove(); App.undo(); };
+    el.innerHTML = '<span>' + esc(msg) + '</span>' + (opts.action ? '<button type="button" data-t="action">' + esc(opts.action.label) + '</button>' : '') + (opts.undo ? '<button type="button" data-t="undo">Rückgängig</button>' : '');
+    var ub = el.querySelector('[data-t="undo"]'), ab = el.querySelector('[data-t="action"]');
+    if (ub) ub.onclick = function () { el.remove(); App.undo(); };
+    if (ab) ab.onclick = function () { el.remove(); opts.action.fn(); };
     root.appendChild(el);
     while (root.children.length > 3) root.removeChild(root.firstChild);
-    setTimeout(function () { el.remove(); }, opts.undo ? 6000 : 3500);
+    setTimeout(function () { el.remove(); }, opts.action ? 10000 : opts.undo ? 6000 : 3500);
   };
 
   // ---------------------------------------------------------------- Modal
@@ -339,6 +341,10 @@
       var st = C.loanStats(s, a.id, today());
       html += '<div class="banner info"><span class="grow"><b>Zinsbindung „' + esc(a.name) + '“ endet am ' + C.formatDate(a.loan.fixedUntil) + '</b> (in ' + days + ' Tagen). Restschuld dann ca. ' + esc(C.formatMoney(st.restAtFixedEnd)) + ' – Zeit, Anschlussfinanzierung / Forward-Darlehen zu vergleichen.</span><a class="btn" href="#kredite">Zum Kredit</a></div>';
     });
+    var closing = App.openClosingMonth && App.openClosingMonth();
+    if (closing && App.view !== 'abschluss' && !App.ui.closingLater) {
+      html += '<div class="banner info"><span class="grow"><b>Monatsabschluss ' + esc(C.formatMonth(closing, true)) + '</b> ist noch offen – Kontoauszüge importieren, zuordnen, Kontostände prüfen. Ca. 10 Minuten.</span><a class="btn primary" href="#abschluss">Starten</a><button class="btn ghost" data-closing-later>Später</button></div>';
+    }
     if (s.meta.demo) {
       html += '<div class="banner info"><span class="grow">Du siehst <b>Beispieldaten</b>. Schau dich um – wenn du startklar bist, lösche sie und lege deine eigenen Konten an.</span><button class="btn" data-clear-demo>Beispieldaten löschen</button></div>';
     }
@@ -346,6 +352,8 @@
     el.innerHTML = html;
     var b = $('[data-reconnect]', el);
     if (b) b.onclick = App.reconnectFile;
+    var cl = $('[data-closing-later]', el);
+    if (cl) cl.onclick = function () { App.ui.closingLater = true; renderBanner(); };
     var d = $('[data-clear-demo]', el);
     if (d) d.onclick = function () {
       App.confirm('Alle Beispieldaten löschen und mit einer leeren Datenbasis (Standard-Kategorien) starten?', function () {
@@ -428,7 +436,7 @@
     s.accounts.forEach(function (a) { if (!a.excludeFromNetWorth && App.isCashAccount(a)) fcLiquid += fc[a.id]; });
 
     var html = '<div class="page-head"><div><h1>Übersicht</h1><div class="sub">' + esc(C.MONTHS_LONG[+t.slice(5, 7) - 1] + ' ' + t.slice(0, 4)) + ' · Stand ' + C.formatDate(t) + '</div></div>' +
-      '<div class="actions"><button class="btn primary" data-act="new-tx">+ Buchung</button><button class="btn" data-act="new-transfer">⇄ Umbuchung</button></div></div>';
+      '<div class="actions"><label class="btn" title="Kontoauszüge (CSV) importieren – mehrere Dateien möglich, oder einfach ins Fenster ziehen">CSV importieren …<input type="file" accept=".csv,.txt,text/csv" multiple data-act="import-files" hidden></label><a class="btn" href="#abschluss">Monatsabschluss</a><button class="btn primary" data-act="new-tx">+ Buchung</button><button class="btn" data-act="new-transfer">⇄ Umbuchung</button></div></div>';
 
     html += '<div class="kpis">' +
       kpi('Nettovermögen', money(nw), 'seit Monatsbeginn ' + C.formatMoney(nw - nwPrev, { sign: true })) +
@@ -437,6 +445,12 @@
       kpi('Einnahmen ' + C.formatMonth(mk), money(inc), '&nbsp;') +
       kpi('Ausgaben ' + C.formatMonth(mk), money(exp), 'Saldo ' + C.formatMoney(inc + exp, { sign: true })) +
       '</div>';
+
+    // Offene Buchungen ohne Kategorie
+    var openCnt = App.countUncategorized ? App.countUncategorized() : 0;
+    if (openCnt) {
+      html += '<div class="card"><div class="todo-item"><span class="grow"><b>' + openCnt + ' Buchungen ohne Kategorie</b> <span class="help">– gruppiert nach Empfänger in einem Rutsch zuordnen.</span></span><button class="btn primary small" data-act="quick-cat">Jetzt zuordnen</button></div></div>';
+    }
 
     // Zu bestätigen
     var due = C.dueConfirmations(s, t);
@@ -498,12 +512,16 @@
 
     el.innerHTML = html;
     App.bindChartTips(el);
+    var impIn = $('[data-act="import-files"]', el);
+    if (impIn) impIn.onchange = function () { if (impIn.files.length) App.importFiles(impIn.files); impIn.value = ''; };
     el.onclick = function (e) {
+      if (e.target.closest('label.btn')) return;
       var a = e.target.closest('[data-act],[data-acc],[data-rule]');
       if (!a) return;
       var act = a.dataset.act;
       if (act === 'new-tx') return App.editTransaction(null);
       if (act === 'new-transfer') return App.editTransaction(null, { type: 'transfer' });
+      if (act === 'quick-cat') return App.quickCategorize();
       if (act === 'due-book' || act === 'due-skip' || act === 'due-edit') {
         var r = C.findById(s.recurring, a.dataset.rule);
         if (act === 'due-book') App.commit('Buchung bestätigt', function () { C.bookNext(App.state, C.findById(App.state.recurring, r.id)); }, { toast: r.name + ' gebucht.' });
@@ -762,6 +780,7 @@
     var sub = singleAcc ? 'Kontostand ' + C.formatMoney(C.accountBalance(s, singleAcc.id, today())) + (singleAcc.type !== 'depot' ? '' : ' (inkl. Depotwert)') : rows.length + ' Buchungen';
     var html = '<div class="page-head"><div><h1>' + esc(title) + '</h1><div class="sub">' + esc(sub) + '</div></div><div class="actions">' +
       (singleAcc ? '<button class="btn" data-act="reconcile">Saldo abgleichen</button><button class="btn" data-act="edit-acc">Konto bearbeiten</button>' : '') +
+      (App.countUncategorized && App.countUncategorized() ? '<button class="btn" data-act="quick-cat">Offene zuordnen (' + App.countUncategorized() + ')</button>' : '') +
       '<button class="btn" data-act="export">CSV exportieren</button></div></div>';
 
     // Schnelleingabe
@@ -950,8 +969,10 @@
           App.commit('Kategorie gesetzt', function (s) {
             s.transactions.forEach(function (t) { if (ids[t.id] && !t.counterAccountId && !(t.tradeId && t.tradeType !== 'dividend')) t.categoryId = cid; });
           }, { toast: 'Kategorie gesetzt.' });
+          var learnIds = Object.keys(ids).filter(function (k) { return ids[k]; });
           App.ui.txSel = {};
           App.render();
+          if (App.learnAfter) setTimeout(function () { App.learnAfter(learnIds); }, 300);
         } else if (act === 'bulk-next') {
           var sel = App.ui.txSel;
           var chosen = App.state.transactions.filter(function (t) { return sel[t.id] && C.isIncomeExpense(t); });
@@ -975,6 +996,7 @@
         } else if (act === 'more') { f.limit += 500; App.render(); }
         else if (act === 'reset') { Object.assign(f, { account: '', period: 'thisMonth', from: '', to: '', cat: '', type: '', q: '', tag: '' }); App.render(); }
         else if (act === 'export') exportCSV();
+        else if (act === 'quick-cat') App.quickCategorize();
         else if (act === 'reconcile') App.reconcile(f.account);
         else if (act === 'edit-acc') App.editAccount(acc(f.account));
         return;
@@ -1075,6 +1097,7 @@
             var i = st.transactions.findIndex(function (x) { return x.id === rec.id; });
             if (i >= 0) st.transactions[i] = rec; else st.transactions.push(rec);
           }, { toast: isNew ? 'Buchung angelegt.' : 'Gespeichert.' });
+          if (rec.categoryId && App.learnAfter) setTimeout(function () { App.learnAfter([rec.id]); }, 300);
         },
         extraButtons: (isNew ? [] : [
           { label: 'Löschen', cls: 'danger', onClick: function () {

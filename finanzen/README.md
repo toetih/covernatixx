@@ -21,6 +21,13 @@ Tipp: In Chrome/Edge über Menü › „Streamen, speichern und teilen“ › �
 5. **Kredite › + Kredit** für eine Baufinanzierung: aktuelle Restschuld, Sollzins, Monatsrate, Zinsbindung. Die Rate wird monatlich gebucht: Zinsen als Ausgabe, Tilgung senkt die Restschuld. Optional die Immobilie als Vermögenswert anlegen.
 6. Optional **CSV-Import** aus Online-Banking oder Finanzguru, danach „Umbuchungen erkennen“.
 
+## Monatlich (ca. 10 Minuten)
+
+1. In jedem Online-Banking die Umsätze als **CSV** exportieren.
+2. Alle Dateien auf einmal **ins App-Fenster ziehen** (oder Übersicht › „CSV importieren …“). Beim ersten Mal ordnest du Spalten und Konto zu – die App merkt sich das als **Import-Profil**. Ab dem zweiten Monat: Datei rein, ein Klick. Depotdateien werden automatisch erkannt.
+3. **„Jetzt zuordnen“**: offene Buchungen sind nach Empfänger gruppiert (z. B. „REWE 12×“) – eine Auswahl pro Zeile. Die App **lernt daraus Regeln**, beim nächsten Import ist das meiste schon kategorisiert.
+4. **Monatsabschluss** (Erinnerung erscheint in der Übersicht): Importe ✓, offene Buchungen ✓, Kontostände prüfen ✓, fertig.
+
 ## Im Alltag
 
 - `N` → neue Buchung, `Enter` bucht. `+50` = Einnahme, `Alt+U` = Umbuchung, `#tag` in der Notiz = Tag.

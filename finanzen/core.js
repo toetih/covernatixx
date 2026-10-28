@@ -940,17 +940,148 @@
 
   // ---------------------------------------------------------------- Auto-Kategorisierung
   /** Regeln: { pattern: 'text' (Teilstring, Groß/klein egal; mehrere mit | trennen), categoryId, field: 'any'|'payee' } */
+  /** Text für Vergleiche vereinheitlichen: klein, Satzzeichen → Leerzeichen. */
+  function normText(s) {
+    return String(s || '').toLowerCase().replace(/[^a-z0-9äöüß]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
   function applyRules(rules, payee, purpose) {
-    var hay = ((payee || '') + ' ' + (purpose || '')).toLowerCase();
-    var payeeL = (payee || '').toLowerCase();
-    for (var i = 0; i < rules.length; i++) {
+    var r = matchRule(rules, payee, purpose);
+    return r ? r.categoryId : null;
+  }
+
+  /** Erste passende Regel (oder null). Vergleich unabhängig von Groß/klein und Satzzeichen. */
+  function matchRule(rules, payee, purpose) {
+    var hay = normText((payee || '') + ' ' + (purpose || ''));
+    var payeeN = normText(payee);
+    for (var i = 0; i < (rules || []).length; i++) {
       var r = rules[i];
       if (!r.pattern || !r.categoryId) continue;
-      var target = r.field === 'payee' ? payeeL : hay;
-      var alts = r.pattern.toLowerCase().split('|');
+      var target = r.field === 'payee' ? payeeN : hay;
+      // Gelernte Regeln nur am Wortanfang („rewe“ passt nicht in „brewery“)
+      var wordStart = r.learned || r.word;
+      if (wordStart) target = ' ' + target;
+      var alts = String(r.pattern).split('|');
       for (var j = 0; j < alts.length; j++) {
-        var a = alts[j].trim();
-        if (a && target.indexOf(a) >= 0) return r.categoryId;
+        var a = normText(alts[j]);
+        if (a && target.indexOf(wordStart ? ' ' + a : a) >= 0) return r;
+      }
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------- Lernen
+  var LEARN_STOP = toSet(('gmbh ag kg se ug ohg co mbh ev e v sagt danke filiale fil nr inh inhaber und gbr kgaa ltd inc sarl s a r l ' +
+    'de www com eu sepa lastschrift kartenzahlung zahlung girocard ec pos visa mastercard debit karte einzug').split(' '));
+  // Sammel-Empfänger, hinter denen ganz verschiedene Dinge stecken → nie automatisch lernen
+  var LEARN_GENERIC = toSet('paypal amazon klarna google apple bargeld geldautomat bargeldauszahlung ueberweisung überweisung umbuchung sumup stripe'.split(' '));
+
+  // Erste Wörter, die allein nichts aussagen → zweites Wort dazunehmen („Deutsche Bahn“ ≠ „Deutsche Telekom“)
+  var LEARN_AMBIG = toSet(('deutsche deutscher stadt landeshauptstadt gemeinde kreis landkreis hotel restaurant cafe café praxis ' +
+    'autohaus herr frau familie fam verein bank volksbank sparkasse landesbank kasse zahnarztpraxis dr prof die der das ' +
+    'ihr mein meine online shop').split(' '));
+
+  /**
+   * Lernschlüssel aus dem Empfänger: das erste markante Wort („REWE Markt GmbH 1234“ → „rewe“,
+   * „Aral Station 0815“ → „aral“). Bei kurzen oder mehrdeutigen Anfängen zwei Wörter („dm drogerie“, „deutsche bahn“).
+   */
+  function learnKey(payee) {
+    var words = normText(payee).split(' ').filter(function (w) { return w.length > 1 && !/^\d+$/.test(w) && !LEARN_STOP[w]; });
+    if (!words.length || LEARN_GENERIC[words[0]]) return null;
+    var key = (words[0].length < 4 || LEARN_AMBIG[words[0]]) ? words.slice(0, 2).join(' ') : words[0];
+    return key.length >= 3 ? key : null;
+  }
+
+  /**
+   * Regeln, die sich aus den Zuordnungen lernen lassen: gleicher Lernschlüssel mindestens
+   * zweimal derselben Kategorie zugeordnet, nie einer anderen, und noch keine Regel greift.
+   * onlyIds (optional): nur Gruppen berücksichtigen, die eine dieser Buchungen enthalten.
+   */
+  function learnableRules(state, onlyIds) {
+    var groups = {};
+    state.transactions.forEach(function (t) {
+      if (!C_isCategorizable(t) || !t.categoryId) return;
+      var k = learnKey(t.payee);
+      if (!k) return;
+      var g = groups[k] || (groups[k] = { cats: {}, ids: {}, payee: t.payee });
+      g.cats[t.categoryId] = (g.cats[t.categoryId] || 0) + 1;
+      g.ids[t.id] = true;
+    });
+    var out = [];
+    Object.keys(groups).forEach(function (k) {
+      var g = groups[k];
+      var cats = Object.keys(g.cats);
+      if (cats.length !== 1 || g.cats[cats[0]] < 2) return;
+      if (onlyIds && !onlyIds.some(function (id) { return g.ids[id]; })) return;
+      if (matchRule(state.rules, g.payee, '')) return;
+      if (!findById(state.categories, cats[0])) return;
+      out.push({ pattern: k, categoryId: cats[0], field: 'payee', count: g.cats[cats[0]] });
+    });
+    return out;
+  }
+
+  function C_isCategorizable(t) { return isIncomeExpense(t) && !t.excludeFromReports; }
+
+  /**
+   * Unkategorisierte Buchungen nach Empfänger gruppiert, mit Kategorie-Vorschlag.
+   * Rückgabe: [{ key, label, ids, count, sum, first, last, accounts, suggestion }]
+   */
+  function uncategorizedGroups(state, opts) {
+    opts = opts || {};
+    var groups = {}, order = [];
+    // Vorschläge aus bereits kategorisierten Buchungen mit gleichem Lernschlüssel
+    var known = {};
+    state.transactions.forEach(function (t) {
+      if (!t.categoryId || !C_isCategorizable(t)) return;
+      var k = learnKey(t.payee) || normText(t.payee);
+      if (!k) return;
+      var m = known[k] || (known[k] = {});
+      m[t.categoryId] = (m[t.categoryId] || 0) + 1;
+    });
+    state.transactions.forEach(function (t) {
+      if (t.categoryId || !C_isCategorizable(t)) return;
+      if (opts.from && t.date < opts.from) return;
+      if (opts.to && t.date > opts.to) return;
+      var sign = t.amount < 0 ? '-' : '+';
+      var k = (learnKey(t.payee) || normText(t.payee) || '(ohne Empfänger)') + sign;
+      var g = groups[k];
+      if (!g) { g = groups[k] = { key: k, base: k.slice(0, -1), label: t.payee || '(ohne Empfänger)', ids: [], count: 0, sum: 0, first: t.date, last: t.date, accounts: {}, sample: t }; order.push(k); }
+      g.ids.push(t.id); g.count++; g.sum += t.amount;
+      if (t.date < g.first) g.first = t.date;
+      if (t.date > g.last) { g.last = t.date; g.sample = t; }
+      g.accounts[t.accountId] = true;
+    });
+    return order.map(function (k) {
+      var g = groups[k];
+      var type = g.sum < 0 ? 'expense' : 'income';
+      var sug = applyRules(state.rules, g.sample.payee, g.sample.note);
+      if (!sug && known[g.base]) {
+        var best = null;
+        Object.keys(known[g.base]).forEach(function (cid) { if (!best || known[g.base][cid] > known[g.base][best]) best = cid; });
+        sug = best;
+      }
+      var c = sug && findById(state.categories, sug);
+      g.suggestion = c && c.type === type ? sug : null;
+      g.type = type;
+      g.accounts = Object.keys(g.accounts);
+      return g;
+    }).sort(function (a, b) { return b.count - a.count || Math.abs(b.sum) - Math.abs(a.sum); });
+  }
+
+  // ---------------------------------------------------------------- Import-Profile
+  /** Signatur einer Kopfzeile, um das Format einer Bank wiederzuerkennen. */
+  function headerSignature(row) {
+    return (row || []).map(normText).join('|');
+  }
+
+  /** Passendes Import-Profil für einen CSV-Text finden: { profile, header } oder null. */
+  function findImportProfile(state, text, kind) {
+    var list = (state.importProfiles || []).filter(function (p) { return !kind || (p.kind || 'tx') === kind; });
+    for (var i = 0; i < list.length; i++) {
+      var p = list[i];
+      var rows = parseCSV(text, p.delim || ';').slice(0, 60);
+      for (var j = 0; j < rows.length; j++) {
+        if (rows[j].length > 1 && headerSignature(rows[j]) === p.signature) return { profile: p, header: j };
       }
     }
     return null;
@@ -1231,7 +1362,8 @@
       securities: [],
       trades: [],
       rules: [],
-      settings: { theme: 'auto' },
+      importProfiles: [],
+      settings: { theme: 'auto', learnRules: true },
       meta: { created: new Date().toISOString(), savedAt: null, lastBackup: null }
     };
   }
@@ -1240,7 +1372,7 @@
   function normalizeState(s) {
     if (!s || typeof s !== 'object') throw new Error('Keine gültigen Finanzdaten.');
     var base = emptyState();
-    ['accounts', 'transactions', 'recurring', 'securities', 'trades', 'rules'].forEach(function (k) {
+    ['accounts', 'transactions', 'recurring', 'securities', 'trades', 'rules', 'importProfiles'].forEach(function (k) {
       if (!Array.isArray(s[k])) s[k] = [];
     });
     if (!Array.isArray(s.categories)) s.categories = base.categories;
@@ -1407,7 +1539,9 @@
     // Kategorien & Auswertung
     categoryPath: categoryPath, mainCategoryId: mainCategoryId, categoryTree: categoryTree, categoryUsage: categoryUsage, descendantIds: descendantIds,
     categoryReport: categoryReport, plannedEntries: plannedEntries, reportMonth: reportMonth, categorySpent: categorySpent, PALETTE: PALETTE,
-    applyRules: applyRules, suggestCategory: suggestCategory,
+    applyRules: applyRules, matchRule: matchRule, suggestCategory: suggestCategory, normText: normText,
+    learnKey: learnKey, learnableRules: learnableRules, uncategorizedGroups: uncategorizedGroups,
+    headerSignature: headerSignature, findImportProfile: findImportProfile,
     // CSV
     parseCSV: parseCSV, detectDelimiter: detectDelimiter, detectHeaderRow: detectHeaderRow, guessMapping: guessMapping,
     dupKey: dupKey, toCSV: toCSV, guessDepotMapping: guessDepotMapping, parseTradeType: parseTradeType, findSecurity: findSecurity, findTransferPairs: findTransferPairs, mergeTransferPair: mergeTransferPair,

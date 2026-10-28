@@ -793,18 +793,24 @@
     // Regeln
     var uncategorized = s.transactions.filter(function (x) { return !x.categoryId && C.isIncomeExpense(x); }).length;
     html += '<div class="card"><div class="card-head"><div><h2>Regeln für automatische Kategorisierung</h2><div class="help">Greifen beim CSV-Import und bei der Eingabe unbekannter Empfänger. Mehrere Suchbegriffe mit | trennen. Die erste passende Regel gewinnt.</div></div>' +
-      '<div class="actions">' + (uncategorized ? '<button class="btn" data-act="apply-rules">Auf ' + uncategorized + ' unkategorisierte anwenden</button>' : '') + '<button class="btn primary" data-act="new-rule">+ Regel</button></div></div>';
+      '<div class="actions"><label class="chk" title="Ordnest du einen Empfänger zweimal derselben Kategorie zu, legt die App automatisch eine Regel an"><input type="checkbox" data-act="learn-toggle"' + (s.settings.learnRules !== false ? ' checked' : '') + '> Regeln automatisch lernen</label>' + (uncategorized ? '<button class="btn" data-act="quick-cat">' + uncategorized + ' offene zuordnen</button><button class="btn" data-act="apply-rules">Regeln anwenden</button>' : '') + '<button class="btn primary" data-act="new-rule">+ Regel</button></div></div>';
     if (!s.rules.length) html += '<div class="empty">Noch keine Regeln. Beispiel: „rewe|edeka|aldi“ → Lebensmittel.</div>';
     else {
       html += '<div class="card-body flush"><table class="tbl"><thead><tr><th>#</th><th>Wenn … enthält</th><th>Suchen in</th><th>→ Kategorie</th><th></th></tr></thead><tbody>';
       s.rules.forEach(function (r, i) {
-        html += '<tr class="click" data-rule="' + r.id + '"><td class="muted">' + (i + 1) + '</td><td><code>' + esc(r.pattern) + '</code></td><td>' + (r.field === 'payee' ? 'Empfänger' : 'Empfänger + Zweck/Notiz') + '</td><td>' + App.h.catLabel(r.categoryId) + '</td>' +
+        html += '<tr class="click" data-rule="' + r.id + '"><td class="muted">' + (i + 1) + '</td><td><code>' + esc(r.pattern) + '</code></td><td>' + (r.field === 'payee' ? 'Empfänger' : 'Empfänger + Zweck/Notiz') + '</td><td>' + App.h.catLabel(r.categoryId) + (r.learned ? ' <span class="badge" title="Automatisch aus deinen Zuordnungen gelernt">gelernt</span>' : '') + '</td>' +
           '<td class="num nowrap"><button class="btn small ghost" data-act="rule-up" data-id="' + r.id + '">↑</button><button class="btn small ghost" data-act="rule-down" data-id="' + r.id + '">↓</button></td></tr>';
       });
       html += '</tbody></table></div>';
     }
     html += '</div>';
     el.innerHTML = html;
+    var lt = $('[data-act="learn-toggle"]', el);
+    if (lt) lt.onchange = function () {
+      var on = lt.checked;
+      App.commit('Regeln lernen', function (st) { st.settings.learnRules = on; }, { render: false });
+      App.toast(on ? 'Regeln werden automatisch gelernt.' : 'Automatisches Lernen aus.');
+    };
     $$('[data-budget]', el).forEach(function (inp) {
       inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } });
       inp.addEventListener('change', function () {
@@ -834,6 +840,8 @@
             if (j < 0 || j >= st.rules.length) return;
             var tmp = st.rules[i]; st.rules[i] = st.rules[j]; st.rules[j] = tmp;
           });
+        } else if (act === 'quick-cat') {
+          App.quickCategorize();
         } else if (act === 'cleanup') {
           App.cleanupCategories();
         } else if (act === 'apply-rules') {
@@ -1000,7 +1008,7 @@
 
     html += '<div class="grid two" style="margin-top:16px">';
     html += '<div class="card"><div class="card-head"><h2>CSV-Import</h2></div><div class="card-body"><p>Umsätze aus dem Online-Banking, von der Kreditkarte oder aus Finanzguru übernehmen. Spalten werden automatisch erkannt, Duplikate übersprungen, Regeln angewendet.</p>' +
-      '<div class="row"><label class="btn primary">CSV-Datei wählen …<input type="file" accept=".csv,.txt,text/csv" data-act="csv" hidden></label><button class="btn" data-act="pairs">Umbuchungen erkennen …</button></div>' +
+      '<div class="row"><label class="btn primary">CSV-Dateien wählen …<input type="file" accept=".csv,.txt,text/csv" data-act="csv" multiple hidden></label><button class="btn" data-act="pairs">Umbuchungen erkennen …</button></div>' +
       '<div class="help mt"><p><b>Depotdaten</b> (Bestand oder Wertpapier-Umsätze) importierst du unter Depots › „CSV importieren …“.</p><p><b>Finanzguru:</b> Export über Einstellungen › Daten exportieren (CSV). Enthält die Datei mehrere Konten, ordnest du sie im Import einzeln zu.</p><p><b>Umbuchungen erkennen:</b> Nach einem Import mehrerer Konten stehen Überträge doppelt drin (Abgang + Eingang). Diese Funktion findet solche Paare und macht daraus echte Umbuchungen.</p></div></div></div>';
     html += '<div class="card"><div class="card-head"><h2>Export &amp; Darstellung</h2></div><div class="card-body">' +
       '<div class="row mb"><button class="btn" data-act="export-csv">Alle Buchungen als CSV (Excel)</button></div>' +
@@ -1009,8 +1017,10 @@
       '<p>In der Schnelleingabe: <kbd>Enter</kbd> bucht · <kbd>Alt</kbd>+<kbd>A</kbd>/<kbd>E</kbd>/<kbd>U</kbd> Ausgabe/Einnahme/Umbuchung · „+50“ = Einnahme</p></div></div></div>';
     html += '</div>';
 
+    html += App.profilesCard ? '<div style="margin-top:16px">' + App.profilesCard() + '</div>' : '';
     html += '<div class="card"><div class="card-head"><h2>Zurücksetzen</h2></div><div class="card-body row"><button class="btn" data-act="demo">Beispieldaten laden</button><button class="btn danger" data-act="wipe">Alle Daten löschen …</button><span class="help">Beides ersetzt den aktuellen Stand – vorher Backup ziehen. Rückgängig mit Strg+Z ist möglich, solange die Seite offen ist.</span></div></div>';
     el.innerHTML = html;
+    if (App.bindProfilesCard) App.bindProfilesCard(el);
 
     el.onclick = function (e) {
       var a = e.target.closest('button[data-act]');
@@ -1056,7 +1066,7 @@
         }).catch(function (err) { App.toast('Datei konnte nicht gelesen werden: ' + err.message, { error: true }); });
         a.value = '';
       }
-      if (a.dataset.act === 'csv' && a.files[0]) { App.csvImport(a.files[0]); a.value = ''; }
+      if (a.dataset.act === 'csv' && a.files.length) { App.importFiles(a.files); a.value = ''; }
     };
   };
 
@@ -1093,11 +1103,32 @@
     catch (e) { return new TextDecoder('windows-1252').decode(buf); }
   }
 
-  App.csvImport = function (file) {
+  /**
+   * CSV-Import von Kontoumsätzen.
+   * qopts (optional, für mehrere Dateien): { step: 'Datei 2 von 3', onDone(result), onSkip() }
+   */
+  App.csvImport = function (file, qopts) {
+    qopts = qopts || {};
     var s = App.state;
     if (!s.accounts.length) return App.toast('Bitte zuerst mindestens ein Konto anlegen.', { error: true });
     file.arrayBuffer().then(function (buf) {
-      var o = { enc: 'auto', delim: null, header: null, map: null, accountId: App.ui.quick.accountId || C.sortedAccounts(s, false)[0].id, accountMode: 'fixed', accMap: {}, invert: false, purposeToNote: true, useRules: true, catFromCsv: true, createCats: true };
+      var o = { enc: 'auto', delim: null, header: null, map: null, accountId: App.ui.quick.accountId || C.sortedAccounts(s, false)[0].id, accountMode: 'fixed', accMap: {}, invert: false, purposeToNote: true, useRules: true, catFromCsv: true, createCats: true,
+        saveProfile: true, profileId: null, profileName: '', showSettings: true };
+      // Bekanntes Bankformat? Dann Einstellungen aus dem Import-Profil übernehmen
+      var pm = C.findImportProfile(s, decode(buf, 'auto'), 'tx');
+      if (pm) {
+        var P = pm.profile;
+        Object.assign(o, {
+          enc: P.enc || 'auto', delim: P.delim, header: pm.header, map: JSON.parse(JSON.stringify(P.map)),
+          accountMode: P.accountMode || 'fixed', accMap: JSON.parse(JSON.stringify(P.accMap || {})),
+          invert: !!P.invert, purposeToNote: P.purposeToNote !== false, useRules: P.useRules !== false,
+          catFromCsv: P.catFromCsv !== false, createCats: P.createCats !== false,
+          profileId: P.id, profileName: P.name, showSettings: false
+        });
+        if (P.accountId && acc(P.accountId) && !acc(P.accountId).archived) o.accountId = P.accountId;
+        else o.showSettings = true;
+      }
+      if (!o.profileName) o.profileName = o.accountMode === 'fixed' && acc(o.accountId) ? acc(o.accountId).name : file.name.replace(/\.[^.]+$/, '');
       var text, rows;
       function parse() {
         text = decode(buf, o.enc);
@@ -1188,6 +1219,7 @@
           entries.forEach(function (e) { if (e.accKey != null && !seen[e.accKey]) { seen[e.accKey] = true; accKeys.push(e.accKey); } });
           accKeys.forEach(function (k) {
             if (o.accMap[k] === undefined) {
+              if (o.profileId) o.showSettings = true; // unbekanntes Konto im bekannten Format → Zuordnung zeigen
               var hit = s.accounts.find(function (a) { return a.name.toLowerCase() === k.toLowerCase() || (a.iban && a.iban.replace(/\s/g, '') === k.replace(/\s/g, '')); });
               o.accMap[k] = hit ? hit.id : '__new';
             }
@@ -1199,8 +1231,10 @@
         }
         var hdrL = (rows[o.header] || []).join(' ').toLowerCase();
         var looksDepot = /isin|wkn/.test(hdrL) && /(stück|stueck|anzahl|menge|nominal|einstand|kurswert)/.test(hdrL);
-        var html = (looksDepot ? '<div class="banner info"><span class="grow"><b>Das sieht nach Depotdaten aus</b> (ISIN, Stückzahl …). Wertpapiere gehören ins Depot, nicht in die Buchungen.</span><button type="button" class="btn primary" data-depot-switch>Als Depot importieren</button></div>' : '') +
-          '<div class="grid two"><div><div class="form-grid">' +
+        var html = (qopts.step ? '<div class="help mb">' + esc(qopts.step) + '</div>' : '') +
+          (looksDepot ? '<div class="banner info"><span class="grow"><b>Das sieht nach Depotdaten aus</b> (ISIN, Stückzahl …). Wertpapiere gehören ins Depot, nicht in die Buchungen.</span><button type="button" class="btn primary" data-depot-switch>Als Depot importieren</button></div>' : '') +
+          (o.profileId ? '<div class="banner info"><span class="grow">✓ <b>Format erkannt:</b> Profil „' + esc(o.profileName) + '“ – Einstellungen übernommen' + (o.accountMode === 'fixed' && acc(o.accountId) ? ', Konto <b>' + esc(acc(o.accountId).name) + '</b>' : '') + '.</span><button type="button" class="btn small" data-toggle-settings>' + (o.showSettings ? 'Einstellungen ausblenden' : 'Einstellungen anzeigen') + '</button></div>' : '') +
+          '<div' + (o.showSettings ? '' : ' style="display:none"') + '><div class="grid two"><div><div class="form-grid">' +
           '<label>Datei</label><div class="ellipsis">' + esc(file.name) + '</div>' +
           '<label>Zeichensatz</label><select data-o="enc"><option value="auto"' + sel('auto', o.enc) + '>automatisch</option><option value="utf-8"' + sel('utf-8', o.enc) + '>UTF-8</option><option value="windows-1252"' + sel('windows-1252', o.enc) + '>Windows (ANSI)</option></select>' +
           '<label>Trennzeichen</label><select data-o="delim">' + [[';', 'Semikolon ;'], [',', 'Komma ,'], ['\t', 'Tabulator'], ['|', 'Senkrechtstrich |']].map(function (x) { return '<option value="' + esc(x[0]) + '"' + sel(x[0], o.delim) + '>' + x[1] + '</option>'; }).join('') + '</select>' +
@@ -1226,7 +1260,10 @@
           '<label class="chk"><input type="checkbox" data-o="purposeToNote"' + (o.purposeToNote ? ' checked' : '') + '> Verwendungszweck als Notiz</label>' +
           '<label class="chk"><input type="checkbox" data-o="useRules"' + (o.useRules ? ' checked' : '') + '> Regeln &amp; bekannte Empfänger nutzen</label>' +
           ((m.category >= 0 || m.subcategory >= 0) ? '<label class="chk"><input type="checkbox" data-o="catFromCsv"' + (o.catFromCsv ? ' checked' : '') + '> Kategorien aus CSV</label><label class="chk"><input type="checkbox" data-o="createCats"' + (o.createCats ? ' checked' : '') + '> fehlende Kategorien anlegen</label>' : '') +
-          '</div>';
+          '</div></div>' +
+          '<hr class="sep"><div class="row"><label class="chk" title="Beim nächsten Import dieser Bank werden Spalten, Konto und Optionen automatisch übernommen"><input type="checkbox" data-o="saveProfile"' + (o.saveProfile ? ' checked' : '') + '> Als Import-Profil merken:</label>' +
+          '<input type="text" data-o="profileName" value="' + esc(o.profileName) + '" style="width:240px" placeholder="z. B. Sparkasse Giro">' +
+          '<span class="help">Nächstes Mal: Datei rein, ein Klick.</span></div>';
         html += '<div class="summary-line" style="padding-left:0;border:0"><span><b>' + ok.length + '</b> werden importiert</span>' + (dups ? '<span><b>' + dups + '</b> Duplikate übersprungen</span>' : '') + (errs ? '<span class="neg"><b>' + errs + '</b> fehlerhaft (Datum/Betrag)</span>' : '') + (noAcc ? '<span><b>' + noAcc + '</b> ohne Konto übersprungen</span>' : '') + '</div>';
         html += '<div class="tbl-wrap" style="max-height:38vh"><table class="tbl"><thead><tr><th>Zeile</th><th>Datum</th>' + (o.accountMode === 'column' ? '<th>Konto</th>' : '') + '<th>Empfänger</th><th>Zweck</th><th>Kategorie</th><th class="num">Betrag</th><th></th></tr></thead><tbody>' +
           entries.slice(0, 60).map(function (e) {
@@ -1241,7 +1278,9 @@
         btn.textContent = ok.length + ' Buchungen importieren';
         btn.disabled = !ok.length;
         var sw = $('[data-depot-switch]', form);
-        if (sw) sw.onclick = function () { App.closeModal(); App.depotCsvImport(file); };
+        if (sw) sw.onclick = function () { App.closeModal(); App.depotCsvImport(file, qopts); };
+        var ts = $('[data-toggle-settings]', form);
+        if (ts) ts.onclick = function () { o.showSettings = !o.showSettings; render(); };
         bind(form);
       }
 
@@ -1250,10 +1289,12 @@
           inp.onchange = function () {
             var k = inp.dataset.o;
             if (inp.type === 'checkbox') o[k] = inp.checked;
+            else if (k === 'profileName') { o.profileName = inp.value; return; }
             else if (k === 'header') { o.header = +inp.value; o.map = null; }
             else if (k === 'delim') { o.delim = inp.value; o.header = null; o.map = null; }
             else if (k === 'enc') { o.enc = inp.value; }
             else o[k] = inp.value;
+            if (k === 'saveProfile') return;
             parse();
             render();
           };
@@ -1273,12 +1314,18 @@
 
       App.modal({
         title: 'CSV-Import', body: '', wide: true, submitLabel: 'Importieren',
+        extraButtons: qopts.onSkip ? [{ label: 'Überspringen', onClick: function () { App.closeModal(); qopts.onSkip(); } }] : [],
         onSubmit: function () {
           var entries = build().filter(function (e) { return !e.errors.length && e.accountId && !e.dup; });
-          if (!entries.length) return false;
+          if (!entries.length) {
+            if (qopts.onSkip) { App.closeModal(); qopts.onSkip(); }
+            return false;
+          }
           var created = { acc: 0, cat: 0 };
+          var newIds = [];
           App.commit('CSV-Import', function (st) {
             var newAcc = {};
+            var touched = {};
             var catCache = {};
             entries.forEach(function (e) {
               var accountId = e.accountId;
@@ -1298,9 +1345,32 @@
                 catId = catCache[key];
               }
               var note = [e.noteCol, o.purposeToNote && e.purpose && e.purpose !== e.payee ? e.purpose : ''].filter(Boolean).join(' · ');
-              st.transactions.push({ id: C.uid(), date: e.date, accountId: accountId, counterAccountId: null, amount: e.amount, payee: e.payee, categoryId: catId || null, note: note, tags: [], imported: true });
+              var tx = { id: C.uid(), date: e.date, accountId: accountId, counterAccountId: null, amount: e.amount, payee: e.payee, categoryId: catId || null, note: note, tags: [], imported: true };
+              st.transactions.push(tx);
+              newIds.push(tx.id);
+              touched[accountId] = true;
             });
+            Object.keys(touched).forEach(function (id) { var a = C.findById(st.accounts, id); if (a) a.lastImport = today(); });
+            if (o.saveProfile && rows[o.header]) {
+              if (!st.importProfiles) st.importProfiles = [];
+              var accMap = {};
+              Object.keys(o.accMap).forEach(function (k) { accMap[k] = o.accMap[k] === '__new' ? (newAcc[k] || '') : o.accMap[k]; });
+              var prof = {
+                id: o.profileId || C.uid(), name: (o.profileName || '').trim() || file.name, kind: 'tx',
+                enc: o.enc, delim: o.delim, signature: C.headerSignature(rows[o.header]), map: o.map,
+                accountMode: o.accountMode, accountId: o.accountMode === 'fixed' ? o.accountId : null, accMap: accMap,
+                invert: o.invert, purposeToNote: o.purposeToNote, useRules: o.useRules, catFromCsv: o.catFromCsv, createCats: o.createCats,
+                lastUsed: today()
+              };
+              var pi = st.importProfiles.findIndex(function (x) { return x.id === prof.id || x.signature === prof.signature && x.accountId === prof.accountId; });
+              if (pi >= 0) { prof.id = st.importProfiles[pi].id; st.importProfiles[pi] = prof; } else st.importProfiles.push(prof);
+            }
           });
+          var openCount = App.state.transactions.filter(function (t) { return newIds.indexOf(t.id) >= 0 && !t.categoryId; }).length;
+          if (qopts.onDone) { setTimeout(function () { qopts.onDone({ imported: entries.length, uncategorized: openCount }); }, 0); return; }
+          if (openCount) setTimeout(function () {
+            App.toast(openCount + ' importierte Buchungen ohne Kategorie.', { action: { label: 'Jetzt zuordnen', fn: function () { App.quickCategorize(); } } });
+          }, 400);
           App.toast(entries.length + ' Buchungen importiert' + (created.acc ? ', ' + created.acc + ' Konten angelegt' : '') + (created.cat ? ', ' + created.cat + ' Kategorien angelegt' : '') + '.', { undo: true });
           if (created.acc) setTimeout(function () { App.toast('Tipp: Bei neuen Konten den Anfangsbestand über „Abgleichen“ setzen.'); }, 800);
         }
@@ -1310,7 +1380,8 @@
   };
 
   // ---------------------------------------------------------------- Depot-CSV-Import
-  App.depotCsvImport = function (file) {
+  App.depotCsvImport = function (file, qopts) {
+    qopts = qopts || {};
     var s = App.state;
     var depots = s.accounts.filter(function (a) { return a.type === 'depot' && !a.archived; });
     if (!depots.length) {
@@ -1466,6 +1537,7 @@
 
       App.modal({
         title: 'Depot-Import', body: '', wide: true, submitLabel: 'Importieren',
+        extraButtons: qopts.onSkip ? [{ label: 'Überspringen', onClick: function () { App.closeModal(); qopts.onSkip(); } }] : [],
         onSubmit: function () {
           var entries = build().filter(function (e) { return !e.errors.length && !e.skip; });
           if (!entries.length) return false;
@@ -1501,6 +1573,7 @@
             });
           });
           App.toast(entries.length + (hold ? ' Positionen eingebucht' : ' Transaktionen importiert') + (newSecs ? ', ' + newSecs + ' Wertpapiere angelegt' : '') + '.', { undo: true });
+          if (qopts.onDone) { setTimeout(function () { qopts.onDone({ imported: entries.length, uncategorized: 0 }); }, 0); return; }
           App.go('depots');
         }
       });

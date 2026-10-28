@@ -266,6 +266,14 @@ label.chk { display: inline-flex; align-items: center; gap: 6px; cursor: pointer
 .banner { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: var(--radius); background: var(--warn-soft); color: var(--text); border: 1px solid var(--border); margin-bottom: 14px; }
 .banner.info { background: var(--accent-soft); }
 .banner .grow { flex: 1; }
+.drop-overlay { position: fixed; inset: 0; z-index: 70; background: rgba(47, 111, 219, .14); border: 3px dashed var(--accent); display: grid; place-items: center; pointer-events: none; }
+.drop-overlay > div { background: var(--surface); color: var(--text); padding: 22px 30px; border-radius: 12px; box-shadow: var(--shadow-lg); text-align: center; font-size: 15px; }
+.drop-overlay span { color: var(--muted); font-size: 13px; }
+.step-dot { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border-strong); font-size: 12px; margin-right: 8px; vertical-align: 1px; }
+.step-dot.ok { background: var(--pos); border-color: var(--pos); color: #fff; }
+.todo-item { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.todo-item:last-child { border-bottom: 0; }
+.todo-item .grow { flex: 1; }
 
 /* ------------------------------------------------ Modal */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(10, 14, 22, .45); display: flex; align-items: flex-start; justify-content: center; padding: 6vh 16px; z-index: 40; overflow-y: auto; }

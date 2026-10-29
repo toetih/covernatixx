@@ -277,7 +277,7 @@
       <button class="btn-primary" style="width:100%;font-size:12px;padding:7px" onclick="newSong()">+ Neuer Song</button>
       <div style="display:flex;gap:6px">
         <button onclick="exportSongs()" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text-muted);padding:5px;font-size:10px;border-radius:7px;cursor:pointer;font-family:'Syne',sans-serif;font-weight:600;transition:all 0.15s" onmouseover="this.style.borderColor='var(--green)';this.style.color='var(--green)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">⬇ Export</button>
-        <button onclick="importSongs()" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text-muted);padding:5px;font-size:10px;border-radius:7px;cursor:pointer;font-family:'Syne',sans-serif;font-weight:600;transition:all 0.15s" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">⬆ Import</button>
+        <button onclick="importSongs()" title="KeySplit-Backup (.json) oder Korg-Kronos-Datei (.PCG) importieren" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text-muted);padding:5px;font-size:10px;border-radius:7px;cursor:pointer;font-family:'Syne',sans-serif;font-weight:600;transition:all 0.15s" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">⬆ Import</button>
       </div>
       <div style="font-size:9px;color:var(--text-muted);line-height:1.4;opacity:0.85" title="Songs werden nur lokal im Browser gespeichert (localStorage). Bei Cache-Löschung, anderem Browser/Gerät gehen sie verloren.">⚠ Nur lokal im Browser gespeichert – regelmäßig exportieren!</div>
     </div>
@@ -364,7 +364,7 @@
 
 <!-- COLOR POPUP -->
 <div id="color-popup"></div>
-<input type="file" id="import-file-input" accept=".json" style="display:none" onchange="handleImportFile(event)">
+<input type="file" id="import-file-input" accept=".json,.pcg,.PCG" multiple style="display:none" onchange="handleImportFile(event)">
 
 <!-- CONFIRM / ALERT MODAL -->
 <div class="modal-overlay-ks" id="confirm-overlay">
@@ -1290,7 +1290,8 @@ function importSongs(){
 // Validates structure before merging into `songs`, so a malformed backup fails
 // with a clear message here instead of crashing later during rendering.
 const VALID_KB_SIZES = Object.keys(KB_START).map(Number);
-function genId(){return Date.now()+Math.floor(Math.random()*100000);}
+let _lastId=0;
+function genId(){_lastId=Math.max(Date.now(),_lastId+1);return _lastId;} // unique even within one millisecond
 function validateImportedSongs(data){
   const rawSongs = data && Array.isArray(data.songs) ? data.songs : (Array.isArray(data) ? data : null);
   if(!Array.isArray(rawSongs)) throw new Error('Kein "songs"-Array in der Datei gefunden.');
@@ -1320,40 +1321,155 @@ function validateImportedSongs(data){
   return rawSongs;
 }
 
-function handleImportFile(e){
-  const file = e.target.files[0];
-  if(!file) return;
-  const reader = new FileReader();
-  reader.onload = async evt => {
-    let imported;
-    try {
-      const data = JSON.parse(evt.target.result);
-      imported = validateImportedSongs(data);
-    } catch(err) {
-      await showAlert(`Die Datei konnte nicht importiert werden:\n${err.message}`,'Import fehlgeschlagen');
-      return;
+// Accepts KeySplit backups (.json) and Korg Kronos PCG files, several at once.
+async function handleImportFile(e){
+  const files=[...e.target.files];
+  if(!files.length) return;
+  const pcgFiles=[],jsonFiles=[];
+  for(const f of files)(await isPcgFile(f)?pcgFiles:jsonFiles).push(f);
+  if(pcgFiles.length) await importPcgFiles(pcgFiles);
+  for(const f of jsonFiles) await importJsonFile(f);
+}
+async function isPcgFile(file){
+  if(/\.pcg$/i.test(file.name)) return true;
+  try{return new TextDecoder('latin1').decode(await file.slice(0,4).arrayBuffer())==='KORG';}catch(e){return false;}
+}
+function clearSongSearch(){const si=document.getElementById('song-search-input');if(si)si.value='';}
+
+async function importJsonFile(file){
+  let imported;
+  try {
+    const data = JSON.parse(await file.text());
+    imported = validateImportedSongs(data);
+  } catch(err) {
+    await showAlert(`„${file.name}“ konnte nicht importiert werden:\n${err.message}`,'Import fehlgeschlagen');
+    return;
+  }
+  const count = imported.length;
+  if(!count){
+    await showAlert('Die Datei enthält keine Songs.','Import fehlgeschlagen');
+    return;
+  }
+  const ok = await showConfirm(`${count} Song(s) importieren?\n\nBestehende Songs bleiben erhalten – importierte Songs werden hinzugefügt.`,{title:'Songs importieren',confirmText:'Importieren'});
+  if(!ok) return;
+  // Merge: add imported songs, avoid id conflicts
+  const existingIds = new Set(songs.map(s=>s.id));
+  imported.forEach(s => {
+    if(existingIds.has(s.id)) s.id = genId();
+    existingIds.add(s.id);
+    songs.push(s);
+  });
+  saveToDisk();
+  clearSongSearch();
+  renderSongList();
+  setStatus(`✓ ${count} Song(s) importiert`,'');
+}
+
+// ---- KORG KRONOS PCG IMPORT ----
+// Layout reverse-engineered from Kronos PCG files (model id 0x68), checked against a real song
+// combi whose timbre key zones tile the keyboard without gaps:
+//   "KORG" header, then a PCG1 container of chunks {id[4], size u32be, u32}; containers nest chunks.
+//   Bank chunks ("…BK1") start with count u32, patch size u32, bank id u32, then the patches;
+//   every patch starts with its 24-byte name.
+//   A combi (7810 bytes) ends with 16 timbre blocks of 188 bytes:
+//     +0 program number, +1 program bank code, +2 status<<5 | MIDI channel (status 1 = INT),
+//     +7 transpose (signed semitones), +37 top key, +38 bottom key (MIDI notes, C4 = 60).
+//   Program bank code of a user bank = PCG bank id + 0x11.
+const PCG_COMBI_SIZE=7810, PCG_TIMBRE_SIZE=188, PCG_TIMBRES=16, PCG_USER_BANK_CODE_OFFSET=0x11;
+function parseKronosPCG(buf){
+  const u8=new Uint8Array(buf), dv=new DataView(buf);
+  const str=(p,n)=>String.fromCharCode(...u8.subarray(p,p+n));
+  const name=p=>str(p,24).split('\0')[0].trim();
+  if(buf.byteLength<28||str(0,4)!=='KORG') throw new Error('Keine Korg-PCG-Datei.');
+  if(u8[4]!==0x68) throw new Error('Nur PCG-Dateien vom Korg Kronos werden unterstützt.');
+
+  const banks=[],problems=[];
+  const isChunkId=p=>p+12<=buf.byteLength&&/^[A-Z0-9]{4}$/.test(str(p,4));
+  (function walk(pos,end){
+    while(pos+12<=end&&isChunkId(pos)){
+      const id=str(pos,4),size=dv.getUint32(pos+4),body=pos+12;
+      if(id.endsWith('BK1')){
+        const bank={type:id,count:dv.getUint32(body),size:dv.getUint32(body+4),bankId:dv.getUint16(body+10),start:body+12};
+        if(bank.start+bank.count*bank.size<=buf.byteLength)banks.push(bank);
+      } else if(isChunkId(body)) walk(body,Math.min(body+size,end));
+      pos=body+size;
     }
-    const count = imported.length;
-    if(!count){
-      await showAlert('Die Datei enthält keine Songs.','Import fehlgeschlagen');
-      return;
+  })(16,buf.byteLength);
+
+  const programs=new Map();
+  banks.filter(b=>b.type==='PBK1'||b.type==='MBK1').forEach(b=>{
+    for(let i=0;i<b.count;i++)programs.set(`${b.bankId}:${i}`,name(b.start+i*b.size));
+  });
+
+  const combis=[];
+  banks.filter(b=>b.type==='CBK1').forEach(b=>{
+    if(b.size!==PCG_COMBI_SIZE){problems.push(`Combi-Format mit ${b.size} Byte wird noch nicht unterstützt.`);return;}
+    for(let i=0;i<b.count;i++){
+      const base=b.start+i*b.size, combiName=name(base);
+      if(!combiName||combiName==='Init Combi')continue;
+      const timbres=[];
+      const t0=base+b.size-PCG_TIMBRES*PCG_TIMBRE_SIZE;
+      for(let t=0;t<PCG_TIMBRES;t++){
+        const p=t0+t*PCG_TIMBRE_SIZE;
+        if(((u8[p+2]>>5)&3)!==1)continue; // only INT timbres make sound on the Kronos itself
+        const top=u8[p+37],bottom=u8[p+38];
+        if(bottom>top||top>127)continue;
+        timbres.push({n:t+1,bottom,top,transpose:dv.getInt8(p+7),channel:u8[p+2]&0x1f,
+          program:programs.get(`${u8[p+1]-PCG_USER_BANK_CODE_OFFSET}:${u8[p]}`)||''});
+      }
+      if(timbres.length)combis.push({name:combiName,timbres:labelKronosTimbres(timbres,combiName)});
     }
-    const ok = await showConfirm(`${count} Song(s) importieren?\n\nBestehende Songs bleiben erhalten – importierte Songs werden hinzugefügt.`,{title:'Songs importieren',confirmText:'Importieren'});
-    if(!ok) return;
-    // Merge: add imported songs, avoid id conflicts
-    const existingIds = new Set(songs.map(s=>s.id));
-    imported.forEach(s => {
-      if(existingIds.has(s.id)) s.id = genId();
-      existingIds.add(s.id);
-      songs.push(s);
-    });
-    saveToDisk();
-    const si=document.getElementById('song-search-input');if(si)si.value='';
-    renderSongList();
-    setStatus(`✓ ${count} Song(s) importiert`,'');
-  };
-  reader.onerror = () => showAlert('Die Datei konnte nicht gelesen werden.','Import fehlgeschlagen');
-  reader.readAsText(file);
+  });
+  return {combis,problems};
+}
+// Zone labels: a descriptive program name if there is one (names like "<Song> 03" are not),
+// plus the timbre number, transpose and a MIDI channel that differs from the other timbres'.
+function labelKronosTimbres(timbres,combiName){
+  const counts={};timbres.forEach(t=>{counts[t.channel]=(counts[t.channel]||0)+1;});
+  const mainChannel=+Object.keys(counts).sort((a,b)=>counts[b]-counts[a])[0];
+  return timbres.map(t=>{
+    const own=t.program.startsWith(combiName)?t.program.slice(combiName.length).trim():t.program;
+    const parts=[own&&!/^[\d\s]+$/.test(own)?`${own} · T${t.n}`:`Timbre ${t.n}`];
+    if(t.transpose)parts.push(`${t.transpose>0?'+':'−'}${Math.abs(t.transpose)} HT`);
+    if(t.channel!==mainChannel)parts.push(t.channel<16?`Kanal ${t.channel+1}`:'Gch');
+    return {...t,label:parts.join(' · ')};
+  });
+}
+function kronosCombiToSong(combi,size){
+  const low=KB_START[size],high=low+size-1;
+  const zones=[];
+  combi.timbres.forEach((t,i)=>{
+    // clamp to the physical keyboard; zones entirely outside it are dropped
+    const start=Math.max(t.bottom,low),end=Math.min(t.top,high);
+    if(start<=end)zones.push({id:genId(),name:t.label,color:COLORS[i%COLORS.length],start,end});
+  });
+  return {id:genId(),name:combi.name,keyboards:[{size,name:'Korg Kronos',zones}]};
+}
+async function importPcgFiles(files){
+  const combis=[],problems=[];
+  for(const f of files){
+    try{
+      const r=parseKronosPCG(await f.arrayBuffer());
+      combis.push(...r.combis);
+      r.problems.forEach(p=>problems.push(`${f.name}: ${p}`));
+      if(!r.combis.length&&!r.problems.length)problems.push(`${f.name}: keine Combi mit aktiven Timbres gefunden.`);
+    }catch(err){problems.push(`${f.name}: ${err.message}`);}
+  }
+  if(!combis.length){await showAlert(problems.join('\n'),'Kronos-Import fehlgeschlagen');return;}
+  const list=combis.slice(0,8).map(c=>`• ${c.name} (${c.timbres.length} Timbres)`).join('\n')+(combis.length>8?`\n… und ${combis.length-8} weitere`:'');
+  let last=88;try{last=+localStorage.getItem('keysplit_kronos_size')||88;}catch(e){}
+  const size=await showDialog(
+    `${combis.length===1?'1 Combi':combis.length+' Combis'} gefunden – jede wird ein Song mit den Key Zones ihrer Timbres:\n${list}`+
+    (problems.length?`\n\nHinweis:\n${problems.join('\n')}`:'')+'\n\nWie viele Tasten hat dein Kronos?',
+    {title:'Kronos-Combis importieren',cancelValue:null,buttons:[{label:'Abbrechen',value:null,cls:'btn-ghost'},
+      ...[61,73,88].map(s=>({label:`${s} Tasten`,value:s,cls:s===last?'btn-primary':'btn-ghost'}))]});
+  if(!size)return;
+  try{localStorage.setItem('keysplit_kronos_size',size);}catch(e){}
+  const created=combis.map(c=>kronosCombiToSong(c,size));
+  songs.push(...created);saveToDisk();
+  clearSongSearch();
+  if(created.length===1)loadSong(created[0].id);else renderSongList();
+  setStatus(`✓ ${created.length} Kronos-Combi(s) importiert`,'Zonen prüfen und bei Bedarf umbenennen');
 }
 
 // ---- DEFAULT SETUP ----

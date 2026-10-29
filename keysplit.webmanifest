@@ -1,0 +1,16 @@
+{
+  "name": "KeySplit – Keyboard Split Planer",
+  "short_name": "KeySplit",
+  "description": "Keyboard-Zonen pro Song planen, ansehen und drucken.",
+  "lang": "de",
+  "start_url": "./keysplit.html",
+  "scope": "./keysplit",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "icons": [
+    { "src": "images/keysplit-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "images/keysplit-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "images/keysplit-icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

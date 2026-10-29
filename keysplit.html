@@ -1366,16 +1366,21 @@ async function importJsonFile(file){
 }
 
 // ---- KORG KRONOS PCG IMPORT ----
-// Layout reverse-engineered from Kronos PCG files (model id 0x68), checked against a real song
-// combi whose timbre key zones tile the keyboard without gaps:
+// Layout of Kronos PCG files (model id 0x68) as read by PCG Tools (Michel Keijzers), checked against a
+// real song combi whose timbre key zones tile the keyboard without gaps:
 //   "KORG" header, then a PCG1 container of chunks {id[4], size u32be, u32}; containers nest chunks.
 //   Bank chunks ("…BK1") start with count u32, patch size u32, bank id u32, then the patches;
 //   every patch starts with its 24-byte name.
 //   A combi (7810 bytes) ends with 16 timbre blocks of 188 bytes:
-//     +0 program number, +1 program bank code, +2 status<<5 | MIDI channel (status 1 = INT),
+//     +0 program number, +1 program bank code, +2 status (bits 7–5: Off, Int, Both, Ext, Ex2) | MIDI channel (bits 4–0),
 //     +7 transpose (signed semitones), +37 top key, +38 bottom key (MIDI notes, C4 = 60).
-//   Program bank code of a user bank = PCG bank id + 0x11.
-const PCG_COMBI_SIZE=7810, PCG_TIMBRE_SIZE=188, PCG_TIMBRES=16, PCG_USER_BANK_CODE_OFFSET=0x11;
+const PCG_COMBI_SIZE=7810, PCG_TIMBRE_SIZE=188, PCG_TIMBRES=16;
+const PCG_PROGRAM_BANKS=['I-A','I-B','I-C','I-D','I-E','I-F','U-A','U-B','U-C','U-D','U-E','U-F','U-G','U-AA','U-BB','U-CC','U-DD','U-EE','U-FF','U-GG'];
+// bank id in a PBK1/MBK1 chunk -> bank name (PCG Tools: ProgramBankId2ProgramIndex)
+const pcgProgramBankName=id=>PCG_PROGRAM_BANKS[id===0x8000?5:id<0x8000?id:id-0x20000+6]||null;
+// program bank code in a timbre -> bank name: I-A..I-F 0–5, GM 6, g(1)..g(d) 7–16, U-A..U-G 17–23, U-AA..U-GG 24–30
+// (GM banks are ROM and not stored in a PCG, so they map to null)
+const pcgTimbreBankName=c=>c<=5?PCG_PROGRAM_BANKS[c]:c>=17&&c<=30?PCG_PROGRAM_BANKS[c-11]:null;
 function parseKronosPCG(buf){
   const u8=new Uint8Array(buf), dv=new DataView(buf);
   const str=(p,n)=>String.fromCharCode(...u8.subarray(p,p+n));
@@ -1389,7 +1394,7 @@ function parseKronosPCG(buf){
     while(pos+12<=end&&isChunkId(pos)){
       const id=str(pos,4),size=dv.getUint32(pos+4),body=pos+12;
       if(id.endsWith('BK1')){
-        const bank={type:id,count:dv.getUint32(body),size:dv.getUint32(body+4),bankId:dv.getUint16(body+10),start:body+12};
+        const bank={type:id,count:dv.getUint32(body),size:dv.getUint32(body+4),bankId:dv.getUint32(body+8),start:body+12};
         if(bank.start+bank.count*bank.size<=buf.byteLength)banks.push(bank);
       } else if(isChunkId(body)) walk(body,Math.min(body+size,end));
       pos=body+size;
@@ -1398,7 +1403,8 @@ function parseKronosPCG(buf){
 
   const programs=new Map();
   banks.filter(b=>b.type==='PBK1'||b.type==='MBK1').forEach(b=>{
-    for(let i=0;i<b.count;i++)programs.set(`${b.bankId}:${i}`,name(b.start+i*b.size));
+    const bank=pcgProgramBankName(b.bankId);
+    if(bank)for(let i=0;i<b.count;i++)programs.set(`${bank}:${i}`,name(b.start+i*b.size));
   });
 
   const combis=[];
@@ -1411,11 +1417,12 @@ function parseKronosPCG(buf){
       const t0=base+b.size-PCG_TIMBRES*PCG_TIMBRE_SIZE;
       for(let t=0;t<PCG_TIMBRES;t++){
         const p=t0+t*PCG_TIMBRE_SIZE;
-        if(((u8[p+2]>>5)&3)!==1)continue; // only INT timbres make sound on the Kronos itself
+        const status=(u8[p+2]>>5)&7;
+        if(status!==1&&status!==2)continue; // only Int and Both timbres make sound on the Kronos itself
         const top=u8[p+37],bottom=u8[p+38];
         if(bottom>top||top>127)continue;
         timbres.push({n:t+1,bottom,top,transpose:dv.getInt8(p+7),channel:u8[p+2]&0x1f,
-          program:programs.get(`${u8[p+1]-PCG_USER_BANK_CODE_OFFSET}:${u8[p]}`)||''});
+          program:programs.get(`${pcgTimbreBankName(u8[p+1])}:${u8[p]}`)||''});
       }
       if(timbres.length)combis.push({name:combiName,timbres:labelKronosTimbres(timbres,combiName)});
     }

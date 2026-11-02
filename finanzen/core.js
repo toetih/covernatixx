@@ -827,6 +827,87 @@
     return out;
   }
 
+  /** Fixkosten: aus Dauerauftrag/Vertrag, Kreditrate oder als fix markiert. */
+  function isFixedCost(t) { return !!(t.recurringId || t.ruleId || t.loanPart || t.fixed); }
+  /** Geschäftskonto (Gruppe „Business“/„Geschäft“/„Firma“): Überweisungen von dort aufs Privatkonto sind Entnahmen. */
+  function isBusinessAccount(a) { return !!a && /business|gesch(ä|ae)ft|firma|selbstst/i.test(a.group || ''); }
+
+  /**
+   * Monat im Überblick (nach Abrechnungsmonat): Einnahmen nach Quelle, Ausgaben fix/variabel – gebucht + noch geplant.
+   * Entnahmen von Business-Konten (Umbuchung aufs Privatkonto) erscheinen als eigene Quelle.
+   */
+  function monthBreakdown(state, mk, today, opts) {
+    opts = opts || {};
+    // privat: Geschäftskonten außen vor, dafür zählen Entnahmen (Umbuchung Geschäft → privat) als Einnahmequelle
+    var priv = opts.privateOnly !== false;
+    var bizAcc = {};
+    state.accounts.forEach(function (a) { if (isBusinessAccount(a)) bizAcc[a.id] = true; });
+    var srcs = {}, exp = { fixed: 0, variable: 0, plannedFixed: 0 }, byMain = {};
+    var cat = function (id) { return id ? findById(state.categories, id) : null; };
+    var usedSubs = {};
+    function noteSub(catId) { var c = cat(catId); if (c && c.parentId) (usedSubs[c.parentId] = usedSubs[c.parentId] || {})[c.id] = true; }
+    var planned = today ? plannedEntries(state, today, endOfMonth(mk + '-01')).filter(function (e) { return reportMonth(e) === mk && !categoryExcluded(state, e.categoryId) && !(priv && bizAcc[e.accountId]); }) : [];
+    state.transactions.forEach(function (t) { if (t.amount > 0 && reportMonth(t) === mk && isReportable(state, t) && !(priv && bizAcc[t.accountId])) { var c = cat(t.categoryId); if (!c || c.type !== 'expense') noteSub(t.categoryId); } });
+    planned.forEach(function (e) { if (e.amount > 0) noteSub(e.categoryId); });
+    function incKey(catId) {
+      var c = cat(catId);
+      if (!c) return { key: '__none', label: 'Ohne Kategorie', main: null };
+      var m = c.parentId ? cat(c.parentId) : c;
+      var multi = m && usedSubs[m.id] && Object.keys(usedSubs[m.id]).length > 1;
+      return multi && c.parentId ? { key: c.id, label: c.name, main: m } : { key: m.id, label: m.name, main: m };
+    }
+    function addSrc(k, v, isPlanned) {
+      var o = srcs[k.key] || (srcs[k.key] = { key: k.key, label: k.label, color: k.main ? k.main.color : null, actual: 0, planned: 0, transfer: !!k.transfer });
+      if (isPlanned) o.planned += v; else o.actual += v;
+    }
+    function addExp(t, v, isPlanned) {
+      var c = cat(t.categoryId), mid = c ? (c.parentId || c.id) : '__none';
+      var o = byMain[mid] || (byMain[mid] = { fixed: 0, variable: 0, plannedFixed: 0 });
+      if (isPlanned) { exp.plannedFixed += -v; o.plannedFixed += -v; }
+      else if (isFixedCost(t)) { exp.fixed += -v; o.fixed += -v; } else { exp.variable += -v; o.variable += -v; }
+    }
+    state.transactions.forEach(function (t) {
+      if (reportMonth(t) !== mk) return;
+      if (isReportable(state, t)) {
+        if (priv && bizAcc[t.accountId]) return;
+        if (priv && t.loanPart === 'interest') return;   // steckt in der Kreditrate (unten)
+        var tc = cat(t.categoryId);
+        // Gutschrift in einer Ausgaben-Kategorie (Erstattung, Retoure) mindert die Ausgaben statt Einnahme zu sein
+        if (t.amount > 0 && !(tc && tc.type === 'expense')) addSrc(incKey(t.categoryId), t.amount); else addExp(t, t.amount);
+      } else if (t.counterAccountId && !t.tradeId) {
+        var from = findById(state.accounts, t.amount < 0 ? t.accountId : t.counterAccountId), to = findById(state.accounts, t.amount < 0 ? t.counterAccountId : t.accountId);
+        if (priv && from && to && to.type === 'darlehen' && !bizAcc[from.id] && from.type !== 'darlehen') {
+          // Kreditrate (Zins + Tilgung) zählt im Haushalt als Fixkosten
+          var lo = byMain.__loans || (byMain.__loans = { fixed: 0, variable: 0, plannedFixed: 0 });
+          lo.fixed += Math.abs(t.amount); exp.fixed += Math.abs(t.amount); exp.loans = (exp.loans || 0) + Math.abs(t.amount);
+          return;
+        }
+        if (!priv || !from || !to || [from.type, to.type].some(function (x) { return x === 'darlehen' || x === 'kreditkarte' || x === 'depot'; })) return;
+        if (bizAcc[from.id] && !bizAcc[to.id]) addSrc({ key: 'biz:' + from.id, label: 'Entnahme ' + from.name, main: null, transfer: true }, Math.abs(t.amount));
+        else if (!bizAcc[from.id] && bizAcc[to.id] && to.type !== 'kreditkarte') addSrc({ key: 'biz:' + to.id, label: 'Entnahme ' + to.name, main: null, transfer: true }, -Math.abs(t.amount));
+      }
+    });
+    var loanAcc = {};
+    state.accounts.forEach(function (a) { if (a.type === 'darlehen') loanAcc[a.id] = true; });
+    planned.forEach(function (e) {
+      if (priv && loanAcc[e.accountId]) return;   // Zinsanteil – im Haushalt zählt die ganze Rate
+      if (e.amount > 0) addSrc(incKey(e.categoryId), e.amount, true); else addExp(e, e.amount, true);
+    });
+    if (priv && today) {
+      state.recurring.forEach(function (r) {
+        if (!r.active || ruleKind(r) !== 'loan' || bizAcc[r.accountId]) return;
+        if (loanDebt(state, r.loanAccountId, today) <= 0) return;
+        occurrences(r, endOfMonth(mk + '-01'), 50).forEach(function (d) {
+          if (d <= today || monthKey(d) !== mk) return;
+          var v = Math.abs(r.amount), lo = byMain.__loans || (byMain.__loans = { fixed: 0, variable: 0, plannedFixed: 0 });
+          lo.plannedFixed += v; exp.plannedFixed += v; exp.loansPlanned = (exp.loansPlanned || 0) + v;
+        });
+      });
+    }
+    var list = Object.keys(srcs).map(function (k) { return srcs[k]; }).filter(function (x) { return x.actual + x.planned > 0; }).sort(function (a, b) { return (b.actual + b.planned) - (a.actual + a.planned); });
+    return { sources: list, expense: exp, byMain: byMain };
+  }
+
   // ---------------------------------------------------------------- Auswertungen
   /**
    * Summen je Kategorie und Monat.
@@ -1319,7 +1400,9 @@
    * Rückgabe: { txn, mode } – mode 'replace' (Bankzeile ersetzt den Eintrag, Kategorie bleibt)
    *           oder 'covered' (Eintrag bleibt, Bankzeile wird nicht importiert) – oder null.
    */
-  function findBookingMatch(state, accountId, dateIso, amount, used) {
+  function findBookingMatch(state, accountId, dateIso, amount, used, payee) {
+    // gleicher Empfänger hat Vorrang vor dem nächstgelegenen Datum (zwei gleiche Beträge am selben Tag)
+    var key = payee ? learnKey(payee) : null;
     var best = null, bestD = Infinity;
     for (var i = 0; i < state.transactions.length; i++) {
       var t = state.transactions[i];
@@ -1327,7 +1410,8 @@
       if (effectOn(t, accountId) !== amount) continue;
       var structured = !!(t.recurringId || t.counterAccountId || t.tradeId || t.loanPart);
       var d = Math.abs(diffDays(t.date, dateIso));
-      if (d <= (structured ? 6 : 3) && d < bestD) { best = t; bestD = d; }
+      var score = d + (key && !t.counterAccountId && learnKey(t.payee) !== key ? 10 : 0);
+      if (d <= (structured ? 6 : 3) && score < bestD) { best = t; bestD = score; }
     }
     if (!best) return null;
     return { txn: best, mode: (best.counterAccountId || best.tradeId || best.loanPart) ? 'covered' : 'replace' };
@@ -1350,7 +1434,18 @@
       var score = d + (key && learnKey(t.payee) === key ? 0 : 0.5);
       if (score < bestScore) { best = t; bestScore = score; }
     }
-    return best;
+    if (best) return best;
+    // aufgeteilte Bankbuchung (z. B. Grundgehalt + Sonderzahlung): Summe der Teile
+    var groups = {};
+    state.transactions.forEach(function (t) {
+      if (!t.splitId || (used && used[t.id]) || Math.abs(diffDays(t.date, dateIso)) > 3) return;
+      var g = groups[t.splitId] || (groups[t.splitId] = { sum: 0, parts: [] });
+      g.sum += effectOn(t, accountId); g.parts.push(t);
+    });
+    var hit = Object.keys(groups).map(function (k) { return groups[k]; }).find(function (g) { return g.sum === amount; });
+    if (!hit) return null;
+    if (used) hit.parts.slice(1).forEach(function (t) { used[t.id] = true; });
+    return hit.parts[0];
   }
 
   /**
@@ -1678,7 +1773,7 @@
     loanDebt: loanDebt, loanSchedule: loanSchedule, loanStats: loanStats, loanRule: loanRule, loanRate: loanRate, skipNext: skipNext,
     upcoming: upcoming, forecastBalances: forecastBalances,
     // Konten
-    findById: findById, effectOn: effectOn, isTransfer: isTransfer, isIncomeExpense: isIncomeExpense, isReportable: isReportable, categoryExcluded: categoryExcluded, txType: txType,
+    findById: findById, effectOn: effectOn, isTransfer: isTransfer, isIncomeExpense: isIncomeExpense, isFixedCost: isFixedCost, monthBreakdown: monthBreakdown, isBusinessAccount: isBusinessAccount, isReportable: isReportable, categoryExcluded: categoryExcluded, txType: txType,
     accountBalance: accountBalance, allBalances: allBalances, cashBalance: cashBalance, reconcileAccount: reconcileAccount, netWorth: netWorth, netWorthHistory: netWorthHistory,
     sortedAccounts: sortedAccounts, accountGroups: accountGroups, ACCOUNT_TYPES: ACCOUNT_TYPES,
     // Depots

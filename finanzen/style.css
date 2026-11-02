@@ -312,3 +312,14 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
   .sidebar, .actions, .quick, .filters, .bulk { display: none !important; }
   .app { grid-template-columns: 1fr; }
 }
+
+/* Monat im Überblick: gestapelte Balken Einnahmen/Ausgaben */
+.split-row { margin-bottom: 14px; }
+.split-head { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+.split-track { display: flex; height: 16px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.split-seg { height: 100%; border-right: 1px solid var(--surface); }
+.split-seg:last-child { border-right: 0; }
+.split-seg.planned, .split-legend i.planned { background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.55) 0 4px, transparent 4px 8px); opacity: .75; }
+.split-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; margin-top: 6px; color: var(--muted); }
+.split-legend b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.split-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }

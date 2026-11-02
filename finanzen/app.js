@@ -487,8 +487,10 @@
     html += '<tr class="sum-row"><td>Gesamt</td><td class="num">' + money(nw) + '</td><td class="num">' + money(C.netWorth(s, null, fc)) + '</td></tr>';
     html += '</tbody></table></div></div>';
 
-    // Ausgaben nach Kategorie
-    html += '<div class="card"><div class="card-head"><h2>Ausgaben ' + esc(C.formatMonth(mk, true)) + '</h2><a class="btn small" href="#auswertung">Auswertung</a></div><div class="card-body">' + expenseBars(rep, mk) + '</div></div>';
+    // Monat im Überblick: Einnahmen nach Quelle, Ausgaben fix/variabel, Kategorien
+    var mb = C.monthBreakdown(s, mk, t);
+    html += '<div class="card"><div class="card-head"><h2>Einnahmen &amp; Ausgaben ' + esc(C.formatMonth(mk, true)) + '</h2><a class="btn small" href="#auswertung">Auswertung</a></div><div class="card-body">' +
+      monthSplitBars(mb) + '<hr class="sep">' + expenseBars(rep, mk, mb) + '</div></div>';
     html += '</div>';
 
     html += '<div class="grid two" style="margin-top:16px">';
@@ -544,16 +546,70 @@
   }
   App.ruleAccountsLabel = ruleAccountsLabel;
 
-  function expenseBars(rep, mk) {
+  /** Zwei gestapelte Balken: Einnahmen nach Quelle und Ausgaben fix/variabel (gebucht + noch geplant). */
+  function monthSplitBars(mb) {
+    var PAL = ['var(--series-1)', 'var(--series-3, #1baf7a)', 'var(--series-4, #8a5cd1)', 'var(--series-2)', 'var(--series-5, #3aa6b9)'];
+    var top = mb.sources.slice(0, 4), rest = mb.sources.slice(4);
+    var segs = top.map(function (x, i) { return { label: x.label, actual: x.actual, planned: x.planned, color: PAL[i], transfer: x.transfer }; });
+    if (rest.length) {
+      var r = { label: 'Sonstiges', actual: 0, planned: 0, color: 'var(--muted)', title: rest.map(function (x) { return x.label + ' ' + C.formatMoney(x.actual + x.planned); }).join(' · ') };
+      rest.forEach(function (x) { r.actual += x.actual; r.planned += x.planned; });
+      segs.push(r);
+    }
+    var inc = 0; segs.forEach(function (x) { inc += x.actual + x.planned; });
+    var e = mb.expense, out = e.fixed + e.variable + e.plannedFixed;
+    var max = Math.max(inc, out) || 1;
+    function bar(parts) {
+      return '<div class="split-track">' + parts.map(function (p) {
+        if (!p.v) return '';
+        return '<span class="split-seg' + (p.planned ? ' planned' : '') + '" style="width:' + (p.v / max * 100).toFixed(2) + '%;background:' + p.color + '" title="' + esc(p.title) + '"></span>';
+      }).join('') + '</div>';
+    }
+    function legend(items) {
+      return '<div class="split-legend">' + items.filter(function (x) { return x.v; }).map(function (x) {
+        return '<span title="' + esc(x.title || '') + '"><i class="' + (x.planned ? 'planned' : '') + '" style="background:' + x.color + '"></i>' + esc(x.label) + ' <b>' + esc(C.formatMoney(x.v)) + '</b></span>';
+      }).join('') + '</div>';
+    }
+    var incParts = [];
+    segs.forEach(function (x) { incParts.push({ v: x.actual, color: x.color, title: x.label + ': ' + C.formatMoney(x.actual) + ' gebucht' }); });
+    segs.forEach(function (x) { if (x.planned) incParts.push({ v: x.planned, color: x.color, planned: true, title: x.label + ': ' + C.formatMoney(x.planned) + ' noch geplant' }); });
+    var incPlanned = 0; segs.forEach(function (x) { incPlanned += x.planned; });
+    var expParts = [
+      { v: e.fixed, color: 'var(--series-2)', title: 'Fixkosten gebucht: ' + C.formatMoney(e.fixed) },
+      { v: e.plannedFixed, color: 'var(--series-2)', planned: true, title: 'Fixkosten noch geplant: ' + C.formatMoney(e.plannedFixed) },
+      { v: e.variable, color: 'var(--series-1)', title: 'Variable Ausgaben: ' + C.formatMoney(e.variable) }
+    ];
+    var saldo = inc - out;
+    return '<div class="split-row"><div class="split-head"><span class="bold">Einnahmen</span><span class="bold">' + esc(C.formatMoney(inc)) + '</span></div>' + bar(incParts) +
+      legend(segs.map(function (x) { return { label: x.label + (x.planned && !x.actual ? ' (geplant)' : ''), v: x.actual + x.planned, color: x.color, planned: x.planned && !x.actual, title: x.title || (x.transfer ? 'Umbuchung vom Geschäftskonto aufs Privatkonto' : '') }; })) + '</div>' +
+      '<div class="split-row"><div class="split-head"><span class="bold">Ausgaben</span><span class="bold">' + esc(C.formatMoney(out)) + '</span></div>' + bar(expParts) +
+      legend([{ label: 'Fixkosten', v: e.fixed + e.plannedFixed, color: 'var(--series-2)', title: 'Daueraufträge, Verträge, Kreditraten' + ((e.loans || e.loansPlanned) ? ' (davon Kredite ' + C.formatMoney((e.loans || 0) + (e.loansPlanned || 0)) + ')' : '') + (e.plannedFixed ? ' – ' + C.formatMoney(e.plannedFixed) + ' noch geplant' : '') },
+        { label: 'Variabel', v: e.variable, color: 'var(--series-1)', title: 'alles ohne Dauerauftrag' }]) + '</div>' +
+      '<div class="help">Saldo ' + '<b class="' + (saldo < 0 ? 'neg' : 'pos') + '">' + esc(C.formatMoney(saldo, { sign: true })) + '</b>' + (incPlanned || e.plannedFixed ? ' inkl. noch geplanter Daueraufträge (schraffiert)' : '') +
+      ' · Haushaltssicht: ohne Geschäftskonten (Entnahmen von dort zählen als Einnahme), Kreditraten komplett als Fixkosten, Gehalt vom Monatsende zählt zum Folgemonat.</div>';
+  }
+
+  function expenseBars(rep, mk, mb) {
     var s = App.state;
     var rows = [];
-    Object.keys(rep.byMain).forEach(function (mid) {
-      var v = rep.byMain[mid][mk] || 0;
-      var c = cat(mid);
-      if (c && c.type === 'income') return;
-      if (v >= 0 && !(c && c.budget)) return;
-      rows.push({ id: mid, name: c ? c.name : 'Ohne Kategorie', color: c ? c.color : '#999', v: -v, budget: c ? budgetFor(c) : 0 });
-    });
+    if (mb) {
+      // Haushaltssicht (wie die Balken oben): gebucht + noch geplante Fixkosten, Kreditraten als eigene Zeile
+      Object.keys(mb.byMain).forEach(function (mid) {
+        var o = mb.byMain[mid], c = mid === '__loans' ? null : cat(mid);
+        var fixed = Math.max(o.fixed + o.plannedFixed, 0), v = fixed + o.variable;
+        if (v <= 0 && !(c && budgetFor(c))) return;
+        rows.push({ id: mid, name: mid === '__loans' ? 'Kreditraten' : (c ? c.name : 'Ohne Kategorie'), color: mid === '__loans' ? 'var(--series-2)' : (c ? c.color : '#999'),
+          v: Math.max(v, 0), fixed: Math.min(fixed, Math.max(v, 0)), planned: o.plannedFixed, budget: c ? budgetFor(c) : 0 });
+      });
+    } else {
+      Object.keys(rep.byMain).forEach(function (mid) {
+        var v = rep.byMain[mid][mk] || 0;
+        var c = cat(mid);
+        if (c && c.type === 'income') return;
+        if (v >= 0 && !(c && c.budget)) return;
+        rows.push({ id: mid, name: c ? c.name : 'Ohne Kategorie', color: c ? c.color : '#999', v: -v, fixed: 0, budget: c ? budgetFor(c) : 0 });
+      });
+    }
     // Budgets ohne Ausgaben ebenfalls anzeigen
     s.categories.forEach(function (c) {
       if (!c.parentId && c.type === 'expense' && budgetFor(c) && !rows.some(function (r) { return r.id === c.id; })) {
@@ -565,12 +621,14 @@
     var max = Math.max.apply(null, rows.map(function (r) { return Math.max(r.v, r.budget); })) || 1;
     return '<div class="bars">' + rows.slice(0, 12).map(function (r) {
       var over = r.budget && r.v > r.budget;
-      var title = C.formatMoney(r.v) + (r.budget ? ' von ' + C.formatMoney(r.budget) + ' Budget' : '');
+      var title = C.formatMoney(r.v) + (r.fixed ? ' (davon fix ' + C.formatMoney(r.fixed) + (r.planned ? ', ' + C.formatMoney(r.planned) + ' noch geplant' : '') + ')' : '') + (r.budget ? ' von ' + C.formatMoney(r.budget) + ' Budget' : '');
       return '<div class="bar-row" title="' + esc(title) + '"><span class="name"><span class="cat-dot" style="background:' + esc(r.color) + '"></span>' + esc(r.name) + '</span>' +
-        '<span class="bar-track"><span class="bar-fill" style="display:block;width:' + (r.v / max * 100).toFixed(1) + '%;background:' + (over ? 'var(--neg)' : 'var(--series-1)') + '"></span>' +
+        '<span class="bar-track">' + (r.fixed && !over ? '<span class="bar-fill" style="position:absolute;left:0;top:0;width:' + (r.fixed / max * 100).toFixed(1) + '%;background:var(--series-2)" title="fix ' + esc(C.formatMoney(r.fixed)) + '"></span>' +
+          '<span class="bar-fill" style="position:absolute;top:0;left:' + (r.fixed / max * 100).toFixed(1) + '%;width:' + ((r.v - r.fixed) / max * 100).toFixed(1) + '%;background:var(--series-1)"></span>'
+          : '<span class="bar-fill" style="display:block;width:' + (r.v / max * 100).toFixed(1) + '%;background:' + (over ? 'var(--neg)' : 'var(--series-1)') + '"></span>') +
         (r.budget ? '<span class="bar-budget" style="left:' + (r.budget / max * 100).toFixed(1) + '%"></span>' : '') + '</span>' +
         '<span class="val">' + esc(C.formatMoney(r.v)) + (r.budget ? '<div class="small ' + (over ? 'neg' : 'muted') + '">' + (over ? 'über ' : 'von ') + esc(C.formatMoney(over ? r.v - r.budget : r.budget)) + '</div>' : '') + '</span></div>';
-    }).join('') + '</div>' + (rows.some(function (r) { return r.budget; }) ? '<div class="help mt">Strich = Monatsbudget (einstellbar unter Kategorien).</div>' : '');
+    }).join('') + '</div>' + (rows.length > 12 ? '<div class="help">… und ' + (rows.length - 12) + ' weitere Kategorien</div>' : '') + '<div class="help mt"><span class="cat-dot" style="background:var(--series-2)"></span>fix (inkl. noch geplanter Daueraufträge) <span class="cat-dot" style="background:var(--series-1);margin-left:8px"></span>variabel' + (rows.some(function (r) { return r.budget; }) ? ' · Strich = Monatsbudget (einstellbar unter Kategorien)' : '') + '</div>';
   }
 
   /** Budget einer Hauptkategorie: eigenes Budget oder Summe der Unterkategorie-Budgets. */

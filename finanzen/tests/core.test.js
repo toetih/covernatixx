@@ -583,3 +583,39 @@ test('Kategorie „nicht in Auswertung“: Buchungen und Planwerte zählen nicht
   assert.equal(C.categorySpent(s, exp.id, '2026-10-01', '2026-10-31'), 0);
   assert.equal(C.accountBalance(s, 'giro', '2026-12-31'), 100000 - 359187 + 359200 + 100000);
 });
+
+test('Zwei gleiche Daueraufträge am selben Tag: Bankzeile ersetzt den mit gleichem Empfänger', () => {
+  const s = baseState();
+  s.transactions.push({ id: 'h', date: '2026-11-02', accountId: 'giro', amount: -4000, payee: 'Hannah Lea Muster', recurringId: 'rh', tags: [] });
+  s.transactions.push({ id: 'j', date: '2026-11-02', accountId: 'giro', amount: -4000, payee: 'Jona Muster', recurringId: 'rj', tags: [] });
+  assert.equal(C.findBookingMatch(s, 'giro', '2026-11-02', -4000, {}, 'Jona Muster').txn.id, 'j');
+  assert.equal(C.findBookingMatch(s, 'giro', '2026-11-02', -4000, {}, 'Hannah Lea Muster').txn.id, 'h');
+});
+
+test('Aufgeteilte Bankbuchung (Grundgehalt + Sonderzahlung) wird beim Re-Import als vorhanden erkannt', () => {
+  const s = baseState();
+  s.transactions.push({ id: 'g', date: '2026-10-29', accountId: 'giro', amount: 447762, payee: 'Muster GmbH', imported: true, splitId: 'x', tags: [] });
+  s.transactions.push({ id: 'z', date: '2026-10-29', accountId: 'giro', amount: 315645, payee: 'Muster GmbH', imported: true, splitId: 'x', tags: [] });
+  const used = {};
+  assert.equal(C.findImportedDuplicate(s, 'giro', '2026-10-29', 763407, 'Muster GmbH', used).id, 'g');
+  assert.ok(used.z);
+  assert.equal(C.findImportedDuplicate(s, 'giro', '2026-10-29', 447762, 'Muster GmbH', {}).id, 'g');   // Einzelteil
+});
+
+test('Monatsüberblick: Quellen, Entnahmen vom Geschäftskonto, fix/variabel', () => {
+  const s = baseState();
+  s.accounts.push({ id: 'biz', name: 'Firma', type: 'giro', group: 'Business', opening: 0 });
+  const g = { id: 'geh', name: 'Gehalt', type: 'income', parentId: null };
+  s.categories.push(g, { id: 'gg', name: 'Grundgehalt', type: 'income', parentId: 'geh' }, { id: 'sz', name: 'Sonderzahlung', type: 'income', parentId: 'geh' });
+  const food = s.categories.find(c => c.type === 'expense' && !c.parentId);
+  s.transactions.push({ id: 1, date: '2026-10-29', accountId: 'giro', amount: 447762, categoryId: 'gg', nextMonth: true, tags: [] });
+  s.transactions.push({ id: 2, date: '2026-10-29', accountId: 'giro', amount: 315645, categoryId: 'sz', nextMonth: true, tags: [] });
+  s.transactions.push({ id: 3, date: '2026-11-05', accountId: 'biz', counterAccountId: 'giro', amount: -50000, tags: [] });
+  s.transactions.push({ id: 4, date: '2026-11-06', accountId: 'biz', amount: 99900, categoryId: g.id, tags: [] });   // Geschäftseinnahme: privat außen vor
+  s.transactions.push({ id: 5, date: '2026-11-07', accountId: 'giro', amount: -6000, categoryId: food.id, recurringId: 'r', tags: [] });
+  s.transactions.push({ id: 6, date: '2026-11-08', accountId: 'giro', amount: -2500, categoryId: food.id, tags: [] });
+  s.transactions.push({ id: 7, date: '2026-11-09', accountId: 'giro', amount: 500, categoryId: food.id, tags: [] });     // Erstattung mindert Ausgaben
+  const b = C.monthBreakdown(s, '2026-11', null);
+  assert.deepEqual(b.sources.map(x => [x.label, x.actual]), [['Grundgehalt', 447762], ['Sonderzahlung', 315645], ['Entnahme Firma', 50000]]);
+  assert.deepEqual([b.expense.fixed, b.expense.variable], [6000, 2000]);
+});

@@ -619,3 +619,10 @@ test('Monatsüberblick: Quellen, Entnahmen vom Geschäftskonto, fix/variabel', (
   assert.deepEqual(b.sources.map(x => [x.label, x.actual]), [['Grundgehalt', 447762], ['Sonderzahlung', 315645], ['Entnahme Firma', 50000]]);
   assert.deepEqual([b.expense.fixed, b.expense.variable], [6000, 2000]);
 });
+
+test('Regel mit Betragsgrenze: Tankstelle bis 15 € = Café, darüber Kraftstoff', () => {
+  const rules = [{ id: 'a', pattern: 'aral|jet', field: 'payee', categoryId: 'cafe', maxAmount: 1500 }, { id: 'b', pattern: 'aral|jet', field: 'payee', categoryId: 'fuel' }];
+  assert.equal(C.applyRules(rules, 'ARAL Station', '', -697), 'cafe');
+  assert.equal(C.applyRules(rules, 'JET', '', -5112), 'fuel');
+  assert.equal(C.applyRules(rules, 'JET', ''), 'fuel');   // Betrag unbekannt → Betragsregel greift nicht
+});

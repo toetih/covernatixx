@@ -1458,18 +1458,22 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     return String(s || '').toLowerCase().replace(/[^a-z0-9äöüß]+/g, ' ').replace(/\s+/g, ' ').trim();
   }
 
-  function applyRules(rules, payee, purpose) {
-    var r = matchRule(rules, payee, purpose);
+  function applyRules(rules, payee, purpose, amount) {
+    var r = matchRule(rules, payee, purpose, amount);
     return r ? r.categoryId : null;
   }
 
   /** Erste passende Regel (oder null). Vergleich unabhängig von Groß/klein und Satzzeichen. */
-  function matchRule(rules, payee, purpose) {
+  function matchRule(rules, payee, purpose, amount) {
     var hay = normText((payee || '') + ' ' + (purpose || ''));
     var payeeN = normText(payee);
+    var abs = amount == null || isNaN(amount) ? null : Math.abs(amount);
     for (var i = 0; i < (rules || []).length; i++) {
       var r = rules[i];
       if (!r.pattern || !r.categoryId) continue;
+      // Betragsgrenzen (z. B. Tankstelle bis 15 € = Café): ohne bekannten Betrag greift die Regel nicht
+      if (r.maxAmount != null && (abs == null || abs > r.maxAmount)) continue;
+      if (r.minAmount != null && (abs == null || abs < r.minAmount)) continue;
       var target = r.field === 'payee' ? payeeN : hay;
       // Gelernte Regeln nur am Wortanfang („rewe“ passt nicht in „brewery“)
       var wordStart = r.learned || r.word;
@@ -1569,7 +1573,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     return order.map(function (k) {
       var g = groups[k];
       var type = g.sum < 0 ? 'expense' : 'income';
-      var sug = applyRules(state.rules, g.sample.payee, g.sample.note);
+      var sug = applyRules(state.rules, g.sample.payee, g.sample.note, g.sample.amount);
       if (!sug && known[g.base]) {
         var best = null;
         Object.keys(known[g.base]).forEach(function (cid) { if (!best || known[g.base][cid] > known[g.base][best]) best = cid; });
@@ -2648,6 +2652,9 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
   /** Konto-Filter ('' | id | 'group:Name') -> Array von Konto-IDs oder null */
   App.accountFilterIds = function (val) {
     if (!val) return null;
+    // Haushalt: ohne Geschäftskonten und Konten außerhalb des Haushalts · Geschäft: nur Geschäftskonten
+    if (val === '__household') return App.state.accounts.filter(function (a) { return !C.isBusinessAccount(a) && !a.outsideHousehold; }).map(function (a) { return a.id; });
+    if (val === '__business') return App.state.accounts.filter(function (a) { return C.isBusinessAccount(a); }).map(function (a) { return a.id; });
     if (val.indexOf('group:') === 0) {
       var g = val.slice(6);
       return App.state.accounts.filter(function (a) { return (a.group || 'Ohne Gruppe') === g; }).map(function (a) { return a.id; });
@@ -4564,7 +4571,41 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
   };
 
   // ================================================================ AUSWERTUNG
-  App.ui.rep = { period: 'thisYear', year: null, account: '', detail: false, planned: true };
+  App.ui.rep = { period: 'thisYear', year: null, account: '__household', detail: false, planned: true };
+  App.ui.payees = { period: '', kind: 'expense' };
+
+  /** Größte Empfänger als Balken – Zeitraum wählbar (Auswertungszeitraum, Jahr oder Monat), Ausgaben oder Einnahmen. */
+  function payeeCard(s, accIds, range, t) {
+    var P = App.ui.payees, from = range[0], to = range[1], label = 'Auswertungszeitraum';
+    if (/^\d{4}$/.test(P.period)) { from = P.period + '-01-01'; to = P.period + '-12-31'; label = 'Jahr ' + P.period; }
+    else if (/^\d{4}-\d{2}$/.test(P.period)) { from = P.period + '-01'; to = C.endOfMonth(from); label = C.formatMonth(P.period, true); }
+    var exp = P.kind !== 'income';
+    var groups = {};
+    s.transactions.forEach(function (x) {
+      if (x.date < from || x.date > to || !C.isReportable(s, x)) return;
+      if (accIds && accIds.indexOf(x.accountId) < 0) return;
+      if (exp ? x.amount >= 0 : x.amount <= 0) return;
+      var k = C.learnKey(x.payee) || (x.payee || '–').trim().toLowerCase();
+      var g = groups[k] || (groups[k] = { v: 0, n: 0, names: {} });
+      g.v += Math.abs(x.amount); g.n++; g.names[x.payee || '–'] = (g.names[x.payee || '–'] || 0) + 1;
+    });
+    var list = Object.keys(groups).map(function (k) { var g = groups[k]; var name = Object.keys(g.names).sort(function (a, b) { return g.names[b] - g.names[a]; })[0]; return { name: name, v: g.v, n: g.n }; })
+      .sort(function (a, b) { return b.v - a.v; });
+    var total = 0; list.forEach(function (x) { total += x.v; });
+    var top = list.slice(0, 15), max = top.length ? top[0].v : 1;
+    var opts = '<option value="">Auswertungszeitraum</option>';
+    var ys = {}; s.transactions.forEach(function (x) { ys[x.date.slice(0, 4)] = true; });
+    Object.keys(ys).sort().reverse().forEach(function (y) { if (y <= t.slice(0, 4)) opts += '<option value="' + y + '"' + (P.period === y ? ' selected' : '') + '>Jahr ' + y + '</option>'; });
+    for (var i = 0; i < 24; i++) { var m = C.monthKey(C.addMonths(C.startOfMonth(t), -i)); opts += '<option value="' + m + '"' + (P.period === m ? ' selected' : '') + '>' + esc(C.formatMonth(m, true)) + '</option>'; }
+    return '<div class="card"><div class="card-head"><h2>Größte Empfänger</h2><div class="row"><select data-pf="period">' + opts + '</select>' +
+      '<select data-pf="kind"><option value="expense"' + (exp ? ' selected' : '') + '>Ausgaben</option><option value="income"' + (!exp ? ' selected' : '') + '>Einnahmen</option></select></div></div><div class="card-body">' +
+      (top.length ? '<div class="bars">' + top.map(function (x) {
+        return '<div class="bar-row click" data-payee="' + esc(x.name) + '" title="' + esc(x.name + ': ' + x.n + ' Buchungen, ' + C.formatMoney(x.v)) + '"><span class="name">' + esc(x.name) + ' <span class="small muted">' + x.n + '×</span></span>' +
+          '<span class="bar-track"><span class="bar-fill" style="display:block;width:' + (x.v / max * 100).toFixed(1) + '%;background:' + (exp ? 'var(--series-2)' : 'var(--series-1)') + '"></span></span>' +
+          '<span class="val">' + esc(C.formatMoney(x.v)) + '<div class="small muted">' + (total ? Math.round(x.v / total * 100) : 0) + ' %</div></span></div>';
+      }).join('') + '</div><div class="help mt">' + esc(label) + ' · ' + list.length + ' Empfänger, zusammen ' + esc(C.formatMoney(total)) + ' · Schreibweisen zusammengefasst (z. B. „EDEKA Markt“ = „Edeka“) · Klick zeigt die Buchungen.</div>'
+        : '<div class="empty">Keine Buchungen im Zeitraum.</div>') + '</div></div>';
+  }
 
   App.views.auswertung = function (el) {
     var s = App.state;
@@ -4581,6 +4622,25 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     else { var y = f.year || t.slice(0, 4); range = [y + '-01-01', y + '-12-31']; }
     var accIds = App.accountFilterIds(f.account);
     var rep = C.categoryReport(s, { from: range[0], to: range[1], accountIds: accIds, planned: f.planned, today: t });
+    // Haushalt: Geschäft bleibt außen vor – was vom Geschäftskonto aufs Privatkonto kommt (Privatentnahme), zählt als Einnahme
+    var withdrawals = [];
+    if (f.account === '__household') {
+      var inHH = {}; accIds.forEach(function (id) { inHH[id] = true; });
+      var wd = {};
+      s.transactions.forEach(function (x) {
+        if (!x.counterAccountId || x.tradeId) return;
+        var m = C.monthKey(x.date);
+        if (rep.months.indexOf(m) < 0) return;
+        var fromId = x.amount < 0 ? x.accountId : x.counterAccountId, toId = x.amount < 0 ? x.counterAccountId : x.accountId;
+        var from = C.findById(s.accounts, fromId), to = C.findById(s.accounts, toId);
+        if (!from || !to || inHH[fromId] === inHH[toId]) return;
+        if ([from.type, to.type].some(function (ty) { return ty === 'darlehen' || ty === 'kreditkarte' || ty === 'depot'; })) return;
+        var ext = inHH[fromId] ? to : from, v = inHH[toId] ? Math.abs(x.amount) : -Math.abs(x.amount);
+        var o = wd[ext.id] || (wd[ext.id] = { label: (C.isBusinessAccount(ext) ? 'Privatentnahme ' : 'Von ') + ext.name, data: {} });
+        o.data[m] = (o.data[m] || 0) + v;
+      });
+      Object.keys(wd).forEach(function (k) { withdrawals.push(wd[k]); Object.keys(wd[k].data).forEach(function (m) { rep.income[m] += wd[k].data[m]; }); });
+    }
     var P = rep.planned;
     var months = rep.months;
     var curMonth = C.monthKey(t);
@@ -4589,7 +4649,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     var html = '<div class="page-head"><div><h1>Auswertung</h1><div class="sub">Einnahmen und Ausgaben nach Kategorie – Umbuchungen und Wertpapierkäufe zählen nicht mit. Klick auf einen Betrag zeigt die Buchungen.</div></div>' +
       '<div class="actions"><select data-f="period"><option value="last12"' + sel('last12', f.period) + '>Letzte 12 Monate</option><option value="next12"' + sel('next12', f.period) + '>Nächste 12 Monate</option>' +
       yearList.map(function (y) { return '<option value="y' + y + '"' + (f.period === 'year' && (f.year || t.slice(0, 4)) === y || (f.period === 'thisYear' && y === t.slice(0, 4)) ? ' selected' : '') + '>Jahr ' + y + '</option>'; }).join('') + '</select>' +
-      '<select data-f="account"><option value="">Alle Konten</option>' + App.accountOptions(f.account, { groups: true, includeArchived: true }) + '</select>' +
+      '<select data-f="account"><option value="__household"' + sel('__household', f.account) + '>Haushalt (ohne Geschäft)</option><option value="__business"' + sel('__business', f.account) + '>Nur Geschäft</option><option value=""' + sel('', f.account) + '>Alle Konten</option>' + App.accountOptions(f.account, { groups: true, includeArchived: true }) + '</select>' +
       '<label class="chk" title="Wiederkehrende Buchungen, die noch nicht gebucht sind"><input type="checkbox" data-f="planned"' + (f.planned ? ' checked' : '') + '> Geplante einbeziehen</label>' +
       '<label class="chk"><input type="checkbox" data-f="detail"' + (f.detail ? ' checked' : '') + '> Unterkategorien</label>' +
       '<button class="btn" data-act="print">Drucken</button></div></div>';
@@ -4655,6 +4715,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       // Ohne Kategorie (nach Vorzeichen getrennt)
       var part = rep.none[sec[0]];
       if (Object.keys(part).length) html += row('Ohne Kategorie', part, { cat: '__none', pdata: P.none[sec[0]], dot: '#999' });
+      if (sec[0] === 'income') withdrawals.forEach(function (w) { html += row(w.label, w.data, { dot: '#888', cls: '' }); });
       html += row('Summe ' + sec[1], sec[2], { cls: 'sum-row', pdata: sec[0] === 'income' ? P.income : P.expense });
     });
     var saldo = {}, psaldo = {};
@@ -4671,15 +4732,13 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       if (x.amount < 0 && x.payee) { var k = x.payee.trim(); payees[k] = (payees[k] || 0) + x.amount; }
     });
     var tagList = Object.keys(tags).sort(function (a, b) { return tags[a] - tags[b]; });
-    var payList = Object.keys(payees).sort(function (a, b) { return payees[a] - payees[b]; }).slice(0, 12);
     html += '<div class="grid two" style="margin-top:16px"><div class="card"><div class="card-head"><h2>Tags</h2><span class="help">z. B. #urlaub2026, #steuer</span></div>' +
-      (tagList.length ? '<div class="card-body flush"><table class="tbl"><tbody>' + tagList.map(function (tg) { return '<tr class="click" data-tag="' + esc(tg) + '"><td><span class="tag">#' + esc(tg) + '</span></td><td class="num">' + money(tags[tg]) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="empty">Keine Tags im Zeitraum.</div>') +
-      '</div><div class="card"><div class="card-head"><h2>Größte Empfänger</h2></div>' +
-      (payList.length ? '<div class="card-body flush"><table class="tbl"><tbody>' + payList.map(function (p) { return '<tr class="click" data-payee="' + esc(p) + '"><td>' + esc(p) + '</td><td class="num">' + money(payees[p]) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="empty">Keine Ausgaben im Zeitraum.</div>') +
-      '</div></div>';
+      (tagList.length ? '<div class="card-body flush"><table class="tbl"><tbody>' + tagList.map(function (tg) { return '<tr class="click" data-tag="' + esc(tg) + '"><td><span class="tag">#' + esc(tg) + '</span></td><td class="num">' + money(tags[tg]) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="empty">Noch keine Tags vergeben.</div>') +
+      '</div>' + payeeCard(s, accIds, range, t) + '</div>';
 
     el.innerHTML = html;
     App.bindChartTips(el);
+    $$('[data-pf]', el).forEach(function (inp) { inp.onchange = function () { App.ui.payees[inp.dataset.pf] = inp.value; App.render(); }; });
     $$('[data-f]', el).forEach(function (inp) {
       inp.onchange = function () {
         var k = inp.dataset.f;
@@ -4784,7 +4843,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     else {
       html += '<div class="card-body flush"><table class="tbl"><thead><tr><th>#</th><th>Wenn … enthält</th><th>Suchen in</th><th>→ Kategorie</th><th></th></tr></thead><tbody>';
       s.rules.forEach(function (r, i) {
-        html += '<tr class="click" data-rule="' + r.id + '"><td class="muted">' + (i + 1) + '</td><td><code>' + esc(r.pattern) + '</code></td><td>' + (r.field === 'payee' ? 'Empfänger' : 'Empfänger + Zweck/Notiz') + '</td><td>' + App.h.catLabel(r.categoryId) + (r.learned ? ' <span class="badge" title="Automatisch aus deinen Zuordnungen gelernt">gelernt</span>' : '') + '</td>' +
+        html += '<tr class="click" data-rule="' + r.id + '"><td class="muted">' + (i + 1) + '</td><td><code>' + esc(r.pattern) + '</code></td><td>' + (r.field === 'payee' ? 'Empfänger' : 'Empfänger + Zweck/Notiz') + '</td><td>' + App.h.catLabel(r.categoryId) + (r.learned ? ' <span class="badge" title="Automatisch aus deinen Zuordnungen gelernt">gelernt</span>' : '') + (r.minAmount != null || r.maxAmount != null ? ' <span class="badge">' + (r.minAmount != null ? 'ab ' + esc(C.formatMoney(r.minAmount)) + ' ' : '') + (r.maxAmount != null ? 'bis ' + esc(C.formatMoney(r.maxAmount)) : '') + '</span>' : '') + '</td>' +
           '<td class="num nowrap"><button class="btn small ghost" data-act="rule-up" data-id="' + r.id + '">↑</button><button class="btn small ghost" data-act="rule-down" data-id="' + r.id + '">↓</button></td></tr>';
       });
       html += '</tbody></table></div>';
@@ -4835,7 +4894,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
           App.commit('Regeln angewendet', function (st) {
             st.transactions.forEach(function (x) {
               if (x.categoryId || !C.isIncomeExpense(x)) return;
-              var c = C.applyRules(st.rules, x.payee, x.note);
+              var c = C.applyRules(st.rules, x.payee, x.note, x.amount);
               if (c) { x.categoryId = c; n++; }
             });
           });
@@ -4952,12 +5011,16 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       body: '<div class="form-grid"><label>Suchbegriff(e)</label><input type="text" name="pattern" value="' + esc(d.pattern) + '" placeholder="z. B. rewe|edeka|aldi" autofocus>' +
         '<label>Suchen in</label><select name="field"><option value="any"' + sel('any', d.field) + '>Empfänger + Verwendungszweck/Notiz</option><option value="payee"' + sel('payee', d.field) + '>nur Empfänger</option></select>' +
         '<label>Kategorie</label><select name="categoryId">' + App.categoryOptions(d.categoryId) + '</select>' +
-        '<span></span><div class="help">Groß-/Kleinschreibung egal. Treffer = Text kommt irgendwo vor.</div></div>',
+        '<label>Betrag</label><div class="row"><span class="small">von</span><input type="text" name="minAmount" class="amount" value="' + (d.minAmount != null ? esc(C.formatAmountInput(d.minAmount)) : '') + '" placeholder="beliebig" style="width:100px"><span class="small">bis</span><input type="text" name="maxAmount" class="amount" value="' + (d.maxAmount != null ? esc(C.formatAmountInput(d.maxAmount)) : '') + '" placeholder="beliebig" style="width:100px"><span class="small">€</span></div>' +
+        '<span></span><div class="help">Groß-/Kleinschreibung egal. Treffer = Text kommt irgendwo vor. Betrag optional, z. B. Tankstelle bis 15 € → Restaurant &amp; Café. Regeln mit Betrag stehen am besten oben (erste passende Regel gewinnt).</div></div>',
       onSubmit: function (form) {
         var p = form.elements.pattern.value.trim(), c = form.elements.categoryId.value;
         if (!p || !c) { App.toast('Suchbegriff und Kategorie angeben.', { error: true }); return false; }
         App.commit(isNew ? 'Regel angelegt' : 'Regel geändert', function (st) {
           var rec = { id: d.id || C.uid(), pattern: p, field: form.elements.field.value, categoryId: c };
+          var mn = C.parseMoney(form.elements.minAmount.value), mx = C.parseMoney(form.elements.maxAmount.value);
+          if (form.elements.minAmount.value.trim() && !isNaN(mn)) rec.minAmount = Math.abs(mn);
+          if (form.elements.maxAmount.value.trim() && !isNaN(mx)) rec.maxAmount = Math.abs(mx);
           var i = st.rules.findIndex(function (x) { return x.id === rec.id; });
           if (i >= 0) st.rules[i] = rec; else st.rules.push(rec);
         }, { toast: 'Regel gespeichert.' });
@@ -5190,7 +5253,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
             e.csvCat = { main: main, sub: sub, type: type };
             e.categoryId = catByName(sub, type) || catByName(main, type);
           }
-          if (!e.categoryId && o.useRules) e.categoryId = C.applyRules(s.rules, e.payee, e.purpose);
+          if (!e.categoryId && o.useRules) e.categoryId = C.applyRules(s.rules, e.payee, e.purpose, e.amount);
           if (!e.categoryId && o.useRules) e.categoryId = C.suggestCategory(s, e.payee);
           if (e.categoryId && cat(e.categoryId) && cat(e.categoryId).type !== type) e.categoryId = null;
           if (!e.errors.length && e.accountId) {
@@ -6068,7 +6131,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       cand.forEach(function (r) { st.rules.push({ id: C.uid(), pattern: r.pattern, field: 'payee', categoryId: r.categoryId, learned: true }); });
       st.transactions.forEach(function (t) {
         if (t.categoryId || !C.isIncomeExpense(t) || t.excludeFromReports) return;
-        var c = C.applyRules(st.rules, t.payee, '');
+        var c = C.applyRules(st.rules, t.payee, '', t.amount);
         var cat = c && C.findById(st.categories, c);
         if (cat && cat.type === (t.amount < 0 ? 'expense' : 'income')) { t.categoryId = c; applied++; }
       });

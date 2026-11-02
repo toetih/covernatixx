@@ -1076,18 +1076,22 @@
     return String(s || '').toLowerCase().replace(/[^a-z0-9äöüß]+/g, ' ').replace(/\s+/g, ' ').trim();
   }
 
-  function applyRules(rules, payee, purpose) {
-    var r = matchRule(rules, payee, purpose);
+  function applyRules(rules, payee, purpose, amount) {
+    var r = matchRule(rules, payee, purpose, amount);
     return r ? r.categoryId : null;
   }
 
   /** Erste passende Regel (oder null). Vergleich unabhängig von Groß/klein und Satzzeichen. */
-  function matchRule(rules, payee, purpose) {
+  function matchRule(rules, payee, purpose, amount) {
     var hay = normText((payee || '') + ' ' + (purpose || ''));
     var payeeN = normText(payee);
+    var abs = amount == null || isNaN(amount) ? null : Math.abs(amount);
     for (var i = 0; i < (rules || []).length; i++) {
       var r = rules[i];
       if (!r.pattern || !r.categoryId) continue;
+      // Betragsgrenzen (z. B. Tankstelle bis 15 € = Café): ohne bekannten Betrag greift die Regel nicht
+      if (r.maxAmount != null && (abs == null || abs > r.maxAmount)) continue;
+      if (r.minAmount != null && (abs == null || abs < r.minAmount)) continue;
       var target = r.field === 'payee' ? payeeN : hay;
       // Gelernte Regeln nur am Wortanfang („rewe“ passt nicht in „brewery“)
       var wordStart = r.learned || r.word;
@@ -1187,7 +1191,7 @@
     return order.map(function (k) {
       var g = groups[k];
       var type = g.sum < 0 ? 'expense' : 'income';
-      var sug = applyRules(state.rules, g.sample.payee, g.sample.note);
+      var sug = applyRules(state.rules, g.sample.payee, g.sample.note, g.sample.amount);
       if (!sug && known[g.base]) {
         var best = null;
         Object.keys(known[g.base]).forEach(function (cid) { if (!best || known[g.base][cid] > known[g.base][best]) best = cid; });

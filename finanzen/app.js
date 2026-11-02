@@ -239,6 +239,9 @@
   /** Konto-Filter ('' | id | 'group:Name') -> Array von Konto-IDs oder null */
   App.accountFilterIds = function (val) {
     if (!val) return null;
+    // Haushalt: ohne Geschäftskonten und Konten außerhalb des Haushalts · Geschäft: nur Geschäftskonten
+    if (val === '__household') return App.state.accounts.filter(function (a) { return !C.isBusinessAccount(a) && !a.outsideHousehold; }).map(function (a) { return a.id; });
+    if (val === '__business') return App.state.accounts.filter(function (a) { return C.isBusinessAccount(a); }).map(function (a) { return a.id; });
     if (val.indexOf('group:') === 0) {
       var g = val.slice(6);
       return App.state.accounts.filter(function (a) { return (a.group || 'Ohne Gruppe') === g; }).map(function (a) { return a.id; });

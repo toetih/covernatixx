@@ -90,7 +90,7 @@
       cand.forEach(function (r) { st.rules.push({ id: C.uid(), pattern: r.pattern, field: 'payee', categoryId: r.categoryId, learned: true }); });
       st.transactions.forEach(function (t) {
         if (t.categoryId || !C.isIncomeExpense(t) || t.excludeFromReports) return;
-        var c = C.applyRules(st.rules, t.payee, '');
+        var c = C.applyRules(st.rules, t.payee, '', t.amount);
         var cat = c && C.findById(st.categories, c);
         if (cat && cat.type === (t.amount < 0 ? 'expense' : 'income')) { t.categoryId = c; applied++; }
       });

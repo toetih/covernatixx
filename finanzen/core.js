@@ -844,7 +844,8 @@
       if (!r.active || (r.endDate && r.endDate < today) || r.variable) return;
       var kind = ruleKind(r);
       if (kind !== 'expense' && kind !== 'loan') return;
-      if (isBusinessAccount(findById(state.accounts, r.accountId))) return;
+      var ra = findById(state.accounts, r.accountId);
+      if (isBusinessAccount(ra) || (ra && ra.outsideHousehold)) return;
       if (kind === 'expense' && categoryExcluded(state, r.categoryId)) return;
       if (kind === 'loan' && loanDebt(state, r.loanAccountId, today) <= 0) return;
       var m = -monthlyEquivalent(r);
@@ -867,7 +868,8 @@
     // privat: Geschäftskonten außen vor, dafür zählen Entnahmen (Umbuchung Geschäft → privat) als Einnahmequelle
     var priv = opts.privateOnly !== false;
     var bizAcc = {};
-    state.accounts.forEach(function (a) { if (isBusinessAccount(a)) bizAcc[a.id] = true; });
+    // außerhalb des Haushalts: Geschäftskonten und Konten mit „Nicht in der Haushaltsübersicht“ (z. B. Konto der Partnerin)
+    state.accounts.forEach(function (a) { if (isBusinessAccount(a) || a.outsideHousehold) bizAcc[a.id] = true; });
     var srcs = {}, exp = { fixed: 0, variable: 0, plannedFixed: 0, plannedVariable: 0 }, byMain = {};
     var cat = function (id) { return id ? findById(state.categories, id) : null; };
     var usedSubs = {};
@@ -918,8 +920,8 @@
           return;
         }
         if (!priv || !from || !to || [from.type, to.type].some(function (x) { return x === 'darlehen' || x === 'kreditkarte' || x === 'depot'; })) return;
-        if (bizAcc[from.id] && !bizAcc[to.id]) addSrc({ key: 'biz:' + from.id, label: 'Entnahme ' + from.name, main: null, transfer: true }, Math.abs(t.amount), false, { id: t.id, date: t.date, payee: from.name + ' → ' + to.name });
-        else if (!bizAcc[from.id] && bizAcc[to.id] && to.type !== 'kreditkarte') addSrc({ key: 'biz:' + to.id, label: 'Entnahme ' + to.name, main: null, transfer: true }, -Math.abs(t.amount), false, { id: t.id, date: t.date, payee: from.name + ' → ' + to.name + ' (Einlage)' });
+        if (bizAcc[from.id] && !bizAcc[to.id]) addSrc({ key: 'biz:' + from.id, label: (isBusinessAccount(from) ? 'Entnahme ' : 'Von ') + from.name, main: null, transfer: true }, Math.abs(t.amount), false, { id: t.id, date: t.date, payee: from.name + ' → ' + to.name });
+        else if (!bizAcc[from.id] && bizAcc[to.id] && to.type !== 'kreditkarte') addSrc({ key: 'biz:' + to.id, label: (isBusinessAccount(to) ? 'Entnahme ' : 'Von ') + to.name, main: null, transfer: true }, -Math.abs(t.amount), false, { id: t.id, date: t.date, payee: from.name + ' → ' + to.name + ' (Einlage)' });
       }
     });
     var loanAcc = {};

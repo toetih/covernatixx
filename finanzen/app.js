@@ -616,7 +616,7 @@
         { label: 'Variabel', v: e.variable, color: 'var(--series-1)', title: 'alles ohne Dauerauftrag' },
         { label: 'variabel erwartet', v: (e.plannedVariable || 0) + ev, color: 'var(--series-1)', planned: true, title: 'Rest bis zu einem typischen Monat (Median der letzten 6: ' + C.formatMoney(mb.avgVariable || 0) + '): Lebensmittel, Tanken, Einkäufe …' }]) + '</div>' +
       '<div class="help">Saldo ' + '<b class="' + (saldo < 0 ? 'neg' : 'pos') + '">' + esc(C.formatMoney(saldo, { sign: true })) + '</b>' + (incPlanned || e.plannedFixed ? ' inkl. noch geplanter Daueraufträge' : '') + (ev ? ' und erwarteter variabler Ausgaben' : '') + ((incPlanned || e.plannedFixed || ev) ? ' (schraffiert)' : '') +
-      ' · Haushaltssicht: ohne Geschäftskonten (Entnahmen von dort zählen als Einnahme), Kreditraten komplett als Fixkosten, Gehalt vom Monatsende zählt zum Folgemonat.</div>';
+      ' · Haushaltssicht: ohne Geschäftskonten und Konten außerhalb des Haushalts (Überweisungen von dort zählen als Einnahme), Kreditraten komplett als Fixkosten, Gehalt vom Monatsende zählt zum Folgemonat.</div>';
   }
 
   App.ui.ovOpen = App.ui.ovOpen || {};
@@ -655,12 +655,11 @@
     }
     var cur = group(mb), histG = hist.map(function (h) { return { m: h.m, g: group(h.b) }; });
     function histOf(key) { return histG.map(function (h) { return { m: h.m, v: h.g[key] ? h.g[key].actual : 0 }; }); }
-    // Quellen der letzten Monate auch zeigen, wenn diesen Monat (noch) nichts kam – z. B. Entnahmen, Praxis (ab Ø 100 €)
+    // Quellen der letzten Monate auch zeigen, wenn diesen Monat (noch) nichts kam – z. B. Entnahmen, Praxis (ab 100 € in einem Monat)
     var srcList = Object.keys(cur).map(function (k) { return cur[k]; });
     histG.forEach(function (h) { Object.keys(h.g).forEach(function (k) {
       if (cur[k] || srcList.some(function (z) { return z.key === k; })) return;
-      var avg = 0; histOf(k).forEach(function (x) { avg += x.v; });
-      if (avg / 6 >= 10000) srcList.push({ key: k, label: h.g[k].label, color: h.g[k].color, actual: 0, planned: 0, transfer: h.g[k].transfer, items: [] });
+      if (histOf(k).some(function (x) { return x.v >= 10000; })) srcList.push({ key: k, label: h.g[k].label, color: h.g[k].color, actual: 0, planned: 0, transfer: h.g[k].transfer, items: [] });
     }); });
     srcList.sort(function (a, b) { return (b.actual + b.planned) - (a.actual + a.planned); });
     var max = Math.max.apply(null, srcList.map(function (x) { return x.actual + x.planned; })) || 1;
@@ -1405,6 +1404,7 @@
       s.accounts.filter(function (x) { return x.id !== d.id && ['depot', 'darlehen', 'immobilie'].indexOf(x.type) < 0 && !x.archived; }).map(function (x) { return '<option value="' + x.id + '"' + (d.linkedAccountId === x.id ? ' selected' : '') + '>' + esc(x.name) + '</option>'; }).join('') + '</select>' +
       '<div class="hint">Für Unterkonten wie Tagesgeld/Extra-Konto: Beim CSV-Import wird jede Buchung automatisch zur Umbuchung mit diesem Konto (Zinsgutschriften ausgenommen) – und mit der Gegenbuchung dort zusammengeführt, nichts doppelt.</div>' +
       '<span></span><label class="chk"><input type="checkbox" name="excludeFromNetWorth"' + (d.excludeFromNetWorth ? ' checked' : '') + '> Nicht ins Nettovermögen einrechnen</label>' +
+      '<span></span><label class="chk" title="Einnahmen/Ausgaben dieses Kontos zählen in der Übersicht nicht; Überweisungen von dort auf eure Konten erscheinen als Einnahmequelle"><input type="checkbox" name="outsideHousehold"' + (d.outsideHousehold ? ' checked' : '') + '> Nicht in der Haushaltsübersicht (z. B. Konto der Partnerin) – Geschäftskonten (Gruppe „Business“) automatisch</label>' +
       (isNew ? '' : '<span></span><label class="chk"><input type="checkbox" name="archived"' + (d.archived ? ' checked' : '') + '> Archiviert (aufgelöstes Konto, Buchungen bleiben erhalten)</label>') +
       '</div>';
     var used = !isNew && (s.transactions.some(function (t) { return t.accountId === a.id || t.counterAccountId === a.id; }) || s.trades.some(function (t) { return t.depotId === a.id; }) || s.recurring.some(function (r) { return r.accountId === a.id || r.counterAccountId === a.id || r.depotId === a.id; }));
@@ -1418,8 +1418,10 @@
           name: name, type: form.elements.type.value, group: form.elements.group.value.trim(),
           iban: form.elements.iban.value.trim(), note: form.elements.note.value.trim(),
           excludeFromNetWorth: form.elements.excludeFromNetWorth.checked,
-          linkedAccountId: form.elements.linkedAccountId.value || null
+          linkedAccountId: form.elements.linkedAccountId.value || null,
+          outsideHousehold: form.elements.outsideHousehold.checked || undefined
         });
+        if (!rec.outsideHousehold) delete rec.outsideHousehold;
         if (!rec.linkedAccountId) delete rec.linkedAccountId;
         if (isNew) {
           var b = C.parseMoney(form.elements.balance.value || '0');

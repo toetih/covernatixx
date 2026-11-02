@@ -536,3 +536,32 @@ test('ING-CSV mit Kopfbereich: Spaltenzeile und Konto per IBAN erkennen', () => 
   assert.equal(C.findAccountByIbanInText(s, t).id, 'tg');
   assert.equal(C.findAccountByIbanInText(s, 'Buchung;Betrag\n'), null);
 });
+
+test('Gehalt am Monatsende: Bankbuchung zählt wie der Dauerauftrag zum Folgemonat', () => {
+  const s = baseState();
+  s.recurring.push({ id: 'r', name: 'Grundgehalt', payee: 'Muster Maschinenbau GmbH', amount: 350000, nextMonth: true, accountId: 'giro' });
+  assert.ok(C.nextMonthRuleFor(s, 'Muster Maschinenbau GmbH & Co. KG', '2026-10-28', 512345));
+  assert.ok(C.nextMonthRuleFor(s, 'Muster Maschinenbau', '2026-02-26', 350000));    // Februar: 28 − 7
+  assert.equal(C.nextMonthRuleFor(s, 'Muster Maschinenbau', '2026-07-15', 20150), null); // Monatsmitte
+  assert.equal(C.nextMonthRuleFor(s, 'Muster Maschinenbau', '2026-10-28', -5000), null);  // Ausgabe
+  assert.equal(C.nextMonthRuleFor(s, 'Andere Firma', '2026-10-28', 5000), null);
+  const inc = s.categories.filter(c => c.type === 'income' && !c.parentId);
+  s.recurring[0].categoryId = inc[0].id;
+  assert.ok(C.nextMonthRuleFor(s, 'Muster Maschinenbau', '2026-10-28', 350000, inc[0].id));
+  assert.equal(C.nextMonthRuleFor(s, 'Muster Maschinenbau', '2026-10-28', 600000, inc[1].id), null); // andere Kategorie (Erstattung)
+  const t = { date: '2026-10-28', amount: 350000, nextMonth: true };
+  assert.equal(C.reportMonth(t), '2026-11');
+});
+
+test('Re-Import: schon importierte Buchung wird trotz anderer Schreibweise erkannt, gleiche Einkäufe bleiben', () => {
+  const s = baseState();
+  s.transactions.push({ id: 'a', date: '2026-08-10', accountId: 'giro', amount: -1999, payee: 'Amazon', extId: 'x1', imported: true, tags: [] });
+  s.transactions.push({ id: 'b', date: '2026-08-10', accountId: 'giro', amount: -450, payee: 'Bäckerei', imported: true, tags: [] });
+  s.transactions.push({ id: 'tr', date: '2026-08-12', accountId: 'giro', counterAccountId: 'tg', amount: -20000, payee: 'Umbuchung', imported: true, tags: [] });
+  const used = {};
+  const d1 = C.findImportedDuplicate(s, 'giro', '2026-08-11', -1999, 'AMAZON EU S.A.R.L.', used);
+  assert.equal(d1.id, 'a'); used[d1.id] = true;
+  assert.equal(C.findImportedDuplicate(s, 'giro', '2026-08-10', -1999, 'Amazon', used), null);  // zweiter gleicher Einkauf → neu
+  assert.equal(C.findImportedDuplicate(s, 'tg', '2026-08-12', 20000, 'Hillmann', {}).id, 'tr'); // Gegenseite einer Umbuchung
+  assert.equal(C.findImportedDuplicate(s, 'giro', '2026-08-20', -450, 'Bäckerei', {}), null);   // > 3 Tage
+});

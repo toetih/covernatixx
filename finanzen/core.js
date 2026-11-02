@@ -1322,6 +1322,26 @@
   }
 
   /**
+   * Schon importierte Bankbuchung (z. B. aus Finanzguru oder einer früheren CSV) wiederfinden – auch wenn die Bank
+   * den Empfänger anders schreibt: gleiches Konto, gleiche Wirkung, höchstens 3 Tage Abstand (Buchungs-/Wertstellungstag).
+   * Jede vorhandene Buchung wird nur einmal vergeben (used), damit zwei gleiche Einkäufe beide erhalten bleiben.
+   */
+  function findImportedDuplicate(state, accountId, dateIso, amount, payee, used) {
+    var key = learnKey(payee);
+    var best = null, bestScore = Infinity;
+    for (var i = 0; i < state.transactions.length; i++) {
+      var t = state.transactions[i];
+      if ((used && used[t.id]) || !(t.imported || t.extId) || t.tradeId) continue;
+      if (effectOn(t, accountId) !== amount) continue;
+      var d = Math.abs(diffDays(t.date, dateIso));
+      if (d > 3) continue;
+      var score = d + (key && learnKey(t.payee) === key ? 0 : 0.5);
+      if (score < bestScore) { best = t; bestScore = score; }
+    }
+    return best;
+  }
+
+  /**
    * Konten mit „Bucht nur gegen“ (linkedAccountId): passende Gegenbuchung beim Import finden.
    * - covered: Umbuchung zwischen beiden Konten mit dieser Wirkung gibt es schon (z. B. aus dem Import des anderen Kontos)
    * - merge:   importierte Einzelbuchung auf dem Partnerkonto mit Gegenbetrag → wird zur Umbuchung
@@ -1351,6 +1371,24 @@
     });
     return best ? { txn: best, mode: mode, partnerId: pid } : null;
   }
+  /**
+   * Eingang am Monatsende von einem Zahler, dessen Dauerauftrag „zählt zum Folgemonat“ hat (z. B. Gehalt am 28.)
+   * → auch die importierte Bankbuchung zählt zum Folgemonat. Rückgabe: passende Regel oder null.
+   */
+  function nextMonthRuleFor(state, payee, dateIso, amount, categoryId) {
+    if (!(amount > 0) || !dateIso) return null;
+    var key = learnKey(payee);
+    if (!key) return null;
+    var y = +dateIso.slice(0, 4), m = +dateIso.slice(5, 7), d = +dateIso.slice(8, 10);
+    var dim = new Date(y, m, 0).getDate();
+    if (d < dim - 7) return null;
+    return (state.recurring || []).find(function (r) {
+      // gleiche Kategorie (sofern beide eine haben): Erstattungen vom selben Zahler bleiben im echten Monat
+      return r.nextMonth && !r.counterAccountId && r.amount > 0 && learnKey(r.payee || r.name) === key &&
+        (!categoryId || !r.categoryId || mainCategoryId(state, categoryId) === mainCategoryId(state, r.categoryId));
+    }) || null;
+  }
+
   /** Zinsgutschrift/Rechnungsabschluss – bleibt auch auf verknüpften Konten eine normale Buchung. */
   function isInterestRow(payee, purpose) {
     return /zins|rechnungsabschluss|abschluss|kapitalertrag|gutschrift$/i.test(String(payee || '').trim()) || /^(zinsen|abschluss)/i.test(String(purpose || '').trim());
@@ -1643,7 +1681,7 @@
     headerSignature: headerSignature, findImportProfile: findImportProfile,
     // CSV
     parseCSV: parseCSV, detectDelimiter: detectDelimiter, detectHeaderRow: detectHeaderRow, guessMapping: guessMapping,
-    dupKey: dupKey, toCSV: toCSV, findBookingMatch: findBookingMatch, findLinkedMatch: findLinkedMatch, findAccountByIbanInText: findAccountByIbanInText, linkedPartners: linkedPartners, isInterestRow: isInterestRow, toTransfer: toTransfer, findRecurringGroup: findRecurringGroup, guessDepotMapping: guessDepotMapping, parseTradeType: parseTradeType, findSecurity: findSecurity, findTransferPairs: findTransferPairs, mergeTransferPair: mergeTransferPair,
+    dupKey: dupKey, toCSV: toCSV, findBookingMatch: findBookingMatch, findLinkedMatch: findLinkedMatch, findImportedDuplicate: findImportedDuplicate, nextMonthRuleFor: nextMonthRuleFor, findAccountByIbanInText: findAccountByIbanInText, linkedPartners: linkedPartners, isInterestRow: isInterestRow, toTransfer: toTransfer, findRecurringGroup: findRecurringGroup, guessDepotMapping: guessDepotMapping, parseTradeType: parseTradeType, findSecurity: findSecurity, findTransferPairs: findTransferPairs, mergeTransferPair: mergeTransferPair,
     // Zustand
     emptyState: emptyState, normalizeState: normalizeState, demoState: demoState, defaultCategories: defaultCategories
   };

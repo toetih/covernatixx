@@ -501,6 +501,10 @@
               mode: d.mode, active: isNew ? true : d.active
             };
             var i = st.recurring.findIndex(function (x) { return x.id === rec.id; });
+            if (i >= 0 && !!st.recurring[i].nextMonth !== !!rec.nextMonth) {
+              // „Zählt zum Folgemonat“ geändert → auch die schon gebuchten Termine umstellen
+              st.transactions.forEach(function (t) { if (t.recurringId === rec.id && C.isIncomeExpense(t)) { if (rec.nextMonth) t.nextMonth = true; else delete t.nextMonth; } });
+            }
             if (i >= 0) st.recurring[i] = rec; else st.recurring.push(rec);
             created = C.processRecurring(st, today());
           });
@@ -1208,6 +1212,11 @@
           if (!e.errors.length && e.accountId) {
             var k = C.dupKey(e.accountId, e.date, e.amount, e.payee);
             e.dup = !!existing[k];
+            // schon importiert, nur anders geschrieben (Empfänger/Datum leicht abweichend)?
+            if (!e.dup && e.accountId !== '__new' && !isNaN(e.amount)) {
+              var idup = C.findImportedDuplicate(s, e.accountId, e.date, e.amount, e.payee, usedMatch);
+              if (idup) { usedMatch[idup.id] = true; e.dup = true; e.dupOf = idup; }
+            }
             // gleiche Zeile mehrfach in der Datei ist legitim (z. B. zwei gleiche Einkäufe) – nur gegen Bestand prüfen
             seenInFile[k] = true;
             // Schon als Dauerauftrag, Umbuchung, Kreditrate oder per Hand erfasst?
@@ -1317,7 +1326,7 @@
         html += '<div class="tbl-wrap" style="max-height:38vh"><table class="tbl"><thead><tr><th>Zeile</th><th>Datum</th>' + (o.accountMode === 'column' ? '<th>Konto</th>' : '') + '<th>Empfänger</th><th>Zweck</th><th>Kategorie</th><th class="num">Betrag</th><th></th></tr></thead><tbody>' +
           entries.slice(0, 60).map(function (e) {
             var catTxt = e.linkTo || e.linkMerge ? '<span class="muted">Umbuchung</span>' : e.categoryId ? App.h.catLabel(e.categoryId) : (e.csvCat && (e.csvCat.sub || e.csvCat.main) && o.createCats ? '<span class="badge">neu: ' + esc(e.csvCat.sub || e.csvCat.main) + '</span>' : '<span class="muted">–</span>');
-            var st = e.errors.length ? '<span class="badge warn">Fehler: ' + e.errors.join(', ') + '</span>' : e.linkMerge ? '<span class="badge accent" title="Gegenbuchung auf ' + esc(accName(e.linkPartner)) + ' vom ' + C.formatDate(e.linkMerge.date) + ' wird zur Umbuchung">↔ ' + esc(accName(e.linkPartner)) + ' zusammengeführt</span>' : e.linkTo && !e.dup ? '<span class="badge accent">Umbuchung ↔ ' + esc(accName(e.linkTo)) + '</span>' : (e.covered ? '<span class="badge" title="' + esc(e.covered.payee || '') + ' (' + C.formatDate(e.covered.date) + ')">schon erfasst</span>' : e.dup ? '<span class="badge">Duplikat</span>' : (!e.accountId ? '<span class="badge">übersprungen</span>' : (e.replaces ? '<span class="badge accent" title="ersetzt: ' + esc(e.replaces.payee || '') + ' (' + C.formatDate(e.replaces.date) + ')">ersetzt ' + (e.replaces.recurringId ? 'Dauerauftrag' : 'Eintrag') + '</span>' : '')));
+            var st = e.errors.length ? '<span class="badge warn">Fehler: ' + e.errors.join(', ') + '</span>' : e.linkMerge ? '<span class="badge accent" title="Gegenbuchung auf ' + esc(accName(e.linkPartner)) + ' vom ' + C.formatDate(e.linkMerge.date) + ' wird zur Umbuchung">↔ ' + esc(accName(e.linkPartner)) + ' zusammengeführt</span>' : e.linkTo && !e.dup ? '<span class="badge accent">Umbuchung ↔ ' + esc(accName(e.linkTo)) + '</span>' : (e.covered ? '<span class="badge" title="' + esc(e.covered.payee || '') + ' (' + C.formatDate(e.covered.date) + ')">schon erfasst</span>' : e.dup ? '<span class="badge"' + (e.dupOf ? ' title="schon vorhanden: ' + esc(e.dupOf.payee || '') + ' (' + C.formatDate(e.dupOf.date) + ')"' : '') + '>Duplikat</span>' : (!e.accountId ? '<span class="badge">übersprungen</span>' : (e.replaces ? '<span class="badge accent" title="ersetzt: ' + esc(e.replaces.payee || '') + ' (' + C.formatDate(e.replaces.date) + ')">ersetzt ' + (e.replaces.recurringId ? 'Dauerauftrag' : 'Eintrag') + '</span>' : '')));
             return '<tr class="' + (e.dup || e.errors.length || !e.accountId ? 'muted' : '') + '"><td class="small">' + e.line + '</td><td class="nowrap">' + (e.date ? C.formatDate(e.date) : esc(e.raw[m.date] || '')) + '</td>' +
               (o.accountMode === 'column' ? '<td class="small">' + esc(e.accountId && e.accountId !== '__new' ? accName(e.accountId) : (e.accKey || '')) + '</td>' : '') +
               '<td class="ellipsis" style="max-width:180px">' + esc(e.payee) + '</td><td class="small ellipsis" style="max-width:220px">' + esc(e.purpose) + '</td><td>' + catTxt + '</td><td class="num">' + (isNaN(e.amount) ? '–' : money(e.amount, { color: true })) + '</td><td>' + st + '</td></tr>';
@@ -1399,6 +1408,7 @@
               var note = [e.noteCol, o.purposeToNote && e.purpose && e.purpose !== e.payee ? e.purpose : ''].filter(Boolean).join(' · ');
               var tx = { id: C.uid(), date: e.date, accountId: accountId, counterAccountId: null, amount: e.amount, payee: e.payee, categoryId: catId || null, note: note, tags: [], imported: true };
               if (e.linkTo) C.toTransfer(tx, e.linkTo);
+              else if (C.nextMonthRuleFor(st, tx.payee, tx.date, tx.amount, tx.categoryId)) tx.nextMonth = true;   // z. B. Gehalt am Monatsende
               if (e.replaces) {
                 // Bankzeile ersetzt den geplanten Eintrag: Kategorie, Dauerauftrag-Bezug und Markierungen bleiben
                 var old = C.findById(st.transactions, e.replaces.id);
@@ -1696,6 +1706,7 @@
   var $ = H.$, $$ = H.$$, esc = H.esc, money = H.money, today = H.today, acc = H.acc;
 
   App.ui.loanSim = {};
+  App.ui.loanOpen = {};   // eingeklappte Bereiche je Kredit (Verlauf & Rechner)
 
   function kpi(l, v, sub) { return '<div class="kpi"><div class="l">' + esc(l) + '</div><div class="v">' + v + '</div>' + (sub ? '<div class="s">' + sub + '</div>' : '') + '</div>'; }
   function monthYear(iso) { return iso ? iso.slice(5, 7) + '/' + iso.slice(0, 4) : '–'; }
@@ -1756,6 +1767,9 @@
         App.editTransaction(null, { type: 'transfer', accountId: r ? r.accountId : null, counterAccountId: id, payee: 'Sondertilgung ' + a.name });
       }
     };
+    $$('[data-loan-sec]', el).forEach(function (d) {
+      d.addEventListener('toggle', function () { App.ui.loanOpen[d.dataset.loanSec] = d.open; });
+    });
     $$('[data-sim]', el).forEach(function (inp) {
       var timer;
       inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input', function () {
@@ -1818,7 +1832,9 @@
     var saved = bd.totalInterest - sd.totalInterest;
     var monthsSaved = bd.payoffDate && sd.payoffDate ? (+bd.payoffDate.slice(0, 4) - +sd.payoffDate.slice(0, 4)) * 12 + (+bd.payoffDate.slice(5, 7) - +sd.payoffDate.slice(5, 7)) : 0;
     var sp = x.simIn;
-    h += '<div class="grid two" style="padding:0 16px 16px">' +
+    var openSec = App.ui.loanOpen[a.id] != null ? App.ui.loanOpen[a.id] : x.hasSim;
+    h += '<details class="card-body" data-loan-sec="' + a.id + '" style="border-top:1px solid var(--border)"' + (openSec ? ' open' : '') + '><summary class="bold" style="cursor:pointer">Verlauf &amp; Was wäre wenn …' + (x.hasSim ? ' <span class="badge accent">Rechner aktiv</span>' : '') + '</summary>' +
+      '<div class="grid two mt">' +
       '<div><div class="bold mb">Restschuld-Verlauf' + (x.hasSim ? ' <span class="badge accent">mit Rechner-Werten</span>' : '') + '</div>' + (pts.length > 1 ? App.lineChart(pts) : '<div class="empty">Keine Rate hinterlegt.</div>') + '</div>' +
       '<div><div class="bold mb">Was wäre wenn …</div><div class="form-grid" style="grid-template-columns:190px 1fr">' +
       '<label>Sondertilgung pro Jahr</label><div class="row"><input type="text" class="amount" data-sim="extra" data-id="' + a.id + '" value="' + esc(sp.extra) + '" placeholder="0,00 €" style="width:120px">' +
@@ -1830,7 +1846,7 @@
       '<tr><td>Schuldenfrei</td><td class="num bold">' + (sd.neverEnds ? '<span class="neg">nie</span>' : esc(monthYear(sd.payoffDate))) + (x.hasSim && monthsSaved > 0 ? ' <span class="pos">(' + esc(duration('2000-01-01', C.addMonths('2000-01-01', monthsSaved))) + ' früher)</span>' : '') + '</td></tr>' +
       '<tr><td>Zinsen bis zum Ende</td><td class="num bold">' + esc(C.formatMoney(sd.totalInterest)) + (x.hasSim && saved ? ' <span class="' + (saved > 0 ? 'pos' : 'neg') + '">(' + esc(C.formatMoney(Math.abs(saved))) + (saved > 0 ? ' gespart' : ' mehr') + ')</span>' : '') + '</td></tr>' +
       (cfg.fixedUntil ? '<tr><td>Restschuld ' + C.formatDate(cfg.fixedUntil) + '</td><td class="num bold">' + esc(C.formatMoney(sim.restAtFixedEnd)) + '</td></tr>' : '') +
-      '</tbody></table><div class="help mt">Nur eine Rechnung – gebucht wird nichts. Eine echte Sondertilgung erfasst du mit dem Button oben.</div></div></div>';
+      '</tbody></table><div class="help mt">Nur eine Rechnung – gebucht wird nichts. Eine echte Sondertilgung erfasst du mit dem Button oben.</div></div></div></details>';
 
     // Tilgungsplan pro Jahr
     var years = {};

@@ -497,12 +497,42 @@ test('Gruppen-Abgleich: zwei Verträge in einer Lastschrift, Gehalt mit Sonderza
   const s = baseState();
   s.transactions.push({ id: 'a', date: '2026-10-08', accountId: 'giro', amount: -2999, payee: '1+1 Telecom GmbH', categoryId: 'tz', recurringId: 'r1', tags: [] });
   s.transactions.push({ id: 'b', date: '2026-10-08', accountId: 'giro', amount: -3999, payee: '1+1 Telecom GmbH', categoryId: 'tp', recurringId: 'r2', tags: [] });
-  s.transactions.push({ id: 'g1', date: '2026-10-29', accountId: 'giro', amount: 447762, payee: 'Wilh.Schlechtendahl + Sohne GmbH', recurringId: 'r3', tags: [] });
-  s.transactions.push({ id: 'g2', date: '2026-10-29', accountId: 'giro', amount: 300000, payee: 'Wilh.Schlechtendahl + Sohne GmbH', recurringId: 'r4', tags: [] });
+  s.transactions.push({ id: 'g1', date: '2026-10-29', accountId: 'giro', amount: 350000, payee: 'Muster Maschinenbau GmbH', recurringId: 'r3', tags: [] });
+  s.transactions.push({ id: 'g2', date: '2026-10-29', accountId: 'giro', amount: 150000, payee: 'Muster Maschinenbau GmbH', recurringId: 'r4', tags: [] });
   assert.equal(C.findBookingMatch(s, 'giro', '2026-10-07', -6998), null);
   let g = C.findRecurringGroup(s, 'giro', '2026-10-07', -6998, '1&1');
   assert.deepEqual([g.txns.map(t => t.id).sort().join(), g.exact], ['a,b', true]);
-  g = C.findRecurringGroup(s, 'giro', '2026-10-29', 763407, 'Wilh. Schlechtendahl & Soehne');
+  g = C.findRecurringGroup(s, 'giro', '2026-10-29', 512345, 'Muster Maschinenbau');
   assert.deepEqual([g.txns.length, g.exact], [2, false]);
-  assert.equal(C.findRecurringGroup(s, 'giro', '2026-10-29', 763407, 'Andere Firma'), null);
+  assert.equal(C.findRecurringGroup(s, 'giro', '2026-10-29', 512345, 'Andere Firma'), null);
+});
+
+test('Verknüpftes Konto („Bucht nur gegen“): Gegenbuchung finden, Umbuchung bilden', () => {
+  const s = baseState();
+  s.accounts[1].linkedAccountId = 'giro';
+  assert.deepEqual(C.linkedPartners(s, 'tg'), ['giro']);
+  assert.deepEqual(C.linkedPartners(s, 'giro'), ['tg']);
+  // Giro schon importiert: Eingang 300 € von "Max Muster" → Tagesgeld-Import führt zusammen
+  s.transactions.push({ id: 'g', date: '2026-05-06', accountId: 'giro', amount: 30000, payee: 'Max Muster', categoryId: 'x', imported: true, excludeFromReports: true, tags: [] });
+  let m = C.findLinkedMatch(s, 'tg', '2026-05-05', -30000);
+  assert.deepEqual([m.txn.id, m.mode, m.partnerId], ['g', 'merge', 'giro']);
+  C.toTransfer(m.txn, 'tg');
+  assert.deepEqual([m.txn.accountId, m.txn.counterAccountId, m.txn.amount, m.txn.categoryId, m.txn.excludeFromReports], ['tg', 'giro', -30000, null, undefined]);
+  assert.equal(C.accountBalance(s, 'giro', '2026-12-31'), 130000);
+  // erneuter Import derselben Zeile (von beiden Seiten) → schon erfasst
+  assert.equal(C.findLinkedMatch(s, 'tg', '2026-05-05', -30000).mode, 'covered');
+  assert.equal(C.findLinkedMatch(s, 'giro', '2026-05-06', 30000).mode, 'covered');
+  assert.equal(C.findLinkedMatch(s, 'giro', '2026-05-20', 30000), null);   // > 5 Tage
+  assert.equal(C.findLinkedMatch(s, 'dep', '2026-05-06', 30000), null);    // nicht verknüpft
+  assert.ok(C.isInterestRow('Gutschrift', '') && C.isInterestRow('ING', 'Zinsen 2025') && !C.isInterestRow('Max Muster', 'Umbuchen'));
+});
+
+test('ING-CSV mit Kopfbereich: Spaltenzeile und Konto per IBAN erkennen', () => {
+  const t = 'Umsatzanzeige;Datei erstellt am: 06.11.2026 10:00\n\nIBAN;DE89 3704 0044 0532 0130 00\nKontoname;Extra-Konto\nBank;ING\nZeitraum;01.11.2026 - 06.11.2026\nSaldo;1000,00;EUR\n\nBuchung;Valuta;Auftraggeber/Empfänger;Buchungstext;Verwendungszweck;Saldo;Währung;Betrag;Währung\n06.11.2026;06.11.2026;Max Muster;Ueberweisung;Umbuchen;700,00;EUR;-300,00;EUR\n';
+  const rows = C.parseCSV(t, ';');
+  assert.equal(rows[C.detectHeaderRow(rows)][0], 'Buchung');
+  const s = baseState();
+  s.accounts[1].iban = 'DE89370400440532013000';
+  assert.equal(C.findAccountByIbanInText(s, t).id, 'tg');
+  assert.equal(C.findAccountByIbanInText(s, 'Buchung;Betrag\n'), null);
 });

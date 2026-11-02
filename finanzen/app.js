@@ -1176,7 +1176,7 @@
           html += '<tr class="group-row"><td colspan="4">' + esc(g) + '</td><td class="num">' + money(sum) + '</td><td></td></tr>';
           lastGroup = g;
         }
-        html += '<tr class="' + (a.archived ? 'muted' : '') + '"><td class="sub"><a href="#buchungen" data-open="' + a.id + '">' + esc(a.name) + '</a>' + (a.excludeFromNetWorth ? ' <span class="badge" title="Nicht im Nettovermögen">ausgenommen</span>' : '') + (a.archived ? ' <span class="badge">archiviert</span>' : '') + (a.note ? '<div class="small">' + esc(a.note) + '</div>' : '') + '</td>' +
+        html += '<tr class="' + (a.archived ? 'muted' : '') + '"><td class="sub"><a href="#buchungen" data-open="' + a.id + '">' + esc(a.name) + '</a>' + (a.excludeFromNetWorth ? ' <span class="badge" title="Nicht im Nettovermögen">ausgenommen</span>' : '') + (a.archived ? ' <span class="badge">archiviert</span>' : '') + (a.linkedAccountId && C.findById(s.accounts, a.linkedAccountId) ? ' <span class="badge" title="Bucht nur gegen dieses Konto – CSV-Importe werden zu Umbuchungen">↔ ' + esc(C.findById(s.accounts, a.linkedAccountId).name) + '</span>' : '') + (a.note ? '<div class="small">' + esc(a.note) + '</div>' : '') + '</td>' +
           '<td>' + esc(C.ACCOUNT_TYPES[a.type] || a.type) + '</td><td>' + esc(a.group || '') + '</td><td class="num">' + (counts[a.id] || 0) + '</td><td class="num bold">' + money(bal[a.id]) + '</td>' +
           '<td class="num nowrap"><button class="btn small ghost" data-act="up" data-id="' + a.id + '" title="nach oben">↑</button><button class="btn small ghost" data-act="down" data-id="' + a.id + '" title="nach unten">↓</button>' +
           (a.type !== 'depot' ? '<button class="btn small" data-act="reconcile" data-id="' + a.id + '">Abgleichen</button>' : '<a class="btn small" href="#depots">Depot</a>') +
@@ -1229,6 +1229,9 @@
         : '<label>Anfangsbestand</label><input type="text" name="opening" class="amount" value="' + esc(C.formatAmountInput(d.opening || 0)) + '"><div class="hint">Stand vor der ersten erfassten Buchung. Aktuell: ' + esc(C.formatMoney(bal)) + '. Zum Korrigieren besser „Abgleichen“ nutzen.</div>') +
       '<label>IBAN / Nr.</label><input type="text" name="iban" value="' + esc(d.iban || '') + '" placeholder="optional">' +
       '<label>Notiz</label><input type="text" name="note" value="' + esc(d.note || '') + '" placeholder="optional">' +
+      '<label>Bucht nur gegen</label><select name="linkedAccountId"><option value="">– beliebige Konten –</option>' +
+      s.accounts.filter(function (x) { return x.id !== d.id && ['depot', 'darlehen', 'immobilie'].indexOf(x.type) < 0 && !x.archived; }).map(function (x) { return '<option value="' + x.id + '"' + (d.linkedAccountId === x.id ? ' selected' : '') + '>' + esc(x.name) + '</option>'; }).join('') + '</select>' +
+      '<div class="hint">Für Unterkonten wie Tagesgeld/Extra-Konto: Beim CSV-Import wird jede Buchung automatisch zur Umbuchung mit diesem Konto (Zinsgutschriften ausgenommen) – und mit der Gegenbuchung dort zusammengeführt, nichts doppelt.</div>' +
       '<span></span><label class="chk"><input type="checkbox" name="excludeFromNetWorth"' + (d.excludeFromNetWorth ? ' checked' : '') + '> Nicht ins Nettovermögen einrechnen</label>' +
       (isNew ? '' : '<span></span><label class="chk"><input type="checkbox" name="archived"' + (d.archived ? ' checked' : '') + '> Archiviert (aufgelöstes Konto, Buchungen bleiben erhalten)</label>') +
       '</div>';
@@ -1242,8 +1245,10 @@
         var rec = Object.assign({}, d, {
           name: name, type: form.elements.type.value, group: form.elements.group.value.trim(),
           iban: form.elements.iban.value.trim(), note: form.elements.note.value.trim(),
-          excludeFromNetWorth: form.elements.excludeFromNetWorth.checked
+          excludeFromNetWorth: form.elements.excludeFromNetWorth.checked,
+          linkedAccountId: form.elements.linkedAccountId.value || null
         });
+        if (!rec.linkedAccountId) delete rec.linkedAccountId;
         if (isNew) {
           var b = C.parseMoney(form.elements.balance.value || '0');
           rec.id = C.uid();

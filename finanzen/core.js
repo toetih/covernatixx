@@ -1089,6 +1089,18 @@
     return null;
   }
 
+  /** Konto anhand einer IBAN im Dateikopf erkennen (ING u. a. schreiben sie über die Spaltenzeile). */
+  function findAccountByIbanInText(state, text) {
+    var head = String(text || '').slice(0, 3000);
+    var m = head.match(/[A-Z]{2}\d{2}(?:[ ]?[0-9A-Z]{4}){3,7}(?:[ ]?[0-9A-Z]{1,3})?/g) || [];
+    for (var i = 0; i < m.length; i++) {
+      var ib = m[i].replace(/\s/g, '');
+      var hit = state.accounts.find(function (a) { return a.iban && !a.archived && String(a.iban).replace(/\s/g, '').toUpperCase() === ib; });
+      if (hit) return hit;
+    }
+    return null;
+  }
+
   /** Letzte Kategorie, die für einen Empfänger verwendet wurde. */
   function suggestCategory(state, payee) {
     if (!payee) return null;
@@ -1151,10 +1163,13 @@
   /** Erste Zeile, die wie eine Kopfzeile aussieht (enthält Datum/Betrag o. ä.). */
   function detectHeaderRow(rows) {
     var re = /(datum|date|buchungstag|valuta|betrag|amount|umsatz|empf|auftrag|verwendung)/i;
+    // Zeile mit den meisten Spaltennamen (Kopfbereich wie bei der ING: „Umsatzanzeige;Datei erstellt am …“ überspringen)
+    var bestRow = -1, bestHits = 1;
     for (var i = 0; i < Math.min(rows.length, 40); i++) {
-      var hits = rows[i].filter(function (c) { return re.test(c); }).length;
-      if (hits >= 2) return i;
+      var hits = rows[i].filter(function (c) { return String(c).length < 40 && re.test(c); }).length;
+      if (hits > bestHits) { bestRow = i; bestHits = hits; }
     }
+    if (bestRow >= 0) return bestRow;
     // sonst: erste Zeile mit der häufigsten Spaltenanzahl
     var freq = {};
     rows.forEach(function (r) { freq[r.length] = (freq[r.length] || 0) + 1; });
@@ -1304,6 +1319,49 @@
     }
     if (!best) return null;
     return { txn: best, mode: (best.counterAccountId || best.tradeId || best.loanPart) ? 'covered' : 'replace' };
+  }
+
+  /**
+   * Konten mit „Bucht nur gegen“ (linkedAccountId): passende Gegenbuchung beim Import finden.
+   * - covered: Umbuchung zwischen beiden Konten mit dieser Wirkung gibt es schon (z. B. aus dem Import des anderen Kontos)
+   * - merge:   importierte Einzelbuchung auf dem Partnerkonto mit Gegenbetrag → wird zur Umbuchung
+   * Rückgabe { txn, mode, partnerId } oder null.
+   */
+  function linkedPartners(state, accountId) {
+    var acc = findById(state.accounts, accountId);
+    var ids = [];
+    if (acc && acc.linkedAccountId) ids.push(acc.linkedAccountId);
+    state.accounts.forEach(function (a) { if (a.linkedAccountId === accountId && ids.indexOf(a.id) < 0) ids.push(a.id); });
+    return ids;
+  }
+  function findLinkedMatch(state, accountId, dateIso, amount, used) {
+    var partners = linkedPartners(state, accountId);
+    if (!partners.length) return null;
+    var best = null, bestD = Infinity, mode = null, pid = null;
+    state.transactions.forEach(function (t) {
+      if ((used && used[t.id]) || t.tradeId || t.loanPart) return;
+      var d = Math.abs(diffDays(t.date, dateIso));
+      if (d > 5 || d >= bestD) return;
+      if (t.counterAccountId) {
+        var other = t.accountId === accountId ? t.counterAccountId : t.counterAccountId === accountId ? t.accountId : null;
+        if (other && partners.indexOf(other) >= 0 && (t.imported || t.extId) && effectOn(t, accountId) === amount) { best = t; bestD = d; mode = 'covered'; pid = other; }
+      } else if ((t.imported || t.extId) && partners.indexOf(t.accountId) >= 0 && t.amount === -amount) {
+        best = t; bestD = d; mode = 'merge'; pid = t.accountId;
+      }
+    });
+    return best ? { txn: best, mode: mode, partnerId: pid } : null;
+  }
+  /** Zinsgutschrift/Rechnungsabschluss – bleibt auch auf verknüpften Konten eine normale Buchung. */
+  function isInterestRow(payee, purpose) {
+    return /zins|rechnungsabschluss|abschluss|kapitalertrag|gutschrift$/i.test(String(payee || '').trim()) || /^(zinsen|abschluss)/i.test(String(purpose || '').trim());
+  }
+  /** Importierte Einzelbuchung in eine Umbuchung mit otherId umwandeln (Abgang bleibt Quelle). */
+  function toTransfer(t, otherId) {
+    if (t.amount > 0) { var a = t.accountId; t.accountId = otherId; t.counterAccountId = a; t.amount = -t.amount; }
+    else t.counterAccountId = otherId;
+    t.categoryId = null;
+    delete t.excludeFromReports; delete t.excludeLabel; delete t.nextMonth;
+    return t;
   }
 
   /**
@@ -1585,7 +1643,7 @@
     headerSignature: headerSignature, findImportProfile: findImportProfile,
     // CSV
     parseCSV: parseCSV, detectDelimiter: detectDelimiter, detectHeaderRow: detectHeaderRow, guessMapping: guessMapping,
-    dupKey: dupKey, toCSV: toCSV, findBookingMatch: findBookingMatch, findRecurringGroup: findRecurringGroup, guessDepotMapping: guessDepotMapping, parseTradeType: parseTradeType, findSecurity: findSecurity, findTransferPairs: findTransferPairs, mergeTransferPair: mergeTransferPair,
+    dupKey: dupKey, toCSV: toCSV, findBookingMatch: findBookingMatch, findLinkedMatch: findLinkedMatch, findAccountByIbanInText: findAccountByIbanInText, linkedPartners: linkedPartners, isInterestRow: isInterestRow, toTransfer: toTransfer, findRecurringGroup: findRecurringGroup, guessDepotMapping: guessDepotMapping, parseTradeType: parseTradeType, findSecurity: findSecurity, findTransferPairs: findTransferPairs, mergeTransferPair: mergeTransferPair,
     // Zustand
     emptyState: emptyState, normalizeState: normalizeState, demoState: demoState, defaultCategories: defaultCategories
   };

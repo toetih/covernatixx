@@ -1128,6 +1128,16 @@
         if (P.accountId && acc(P.accountId) && !acc(P.accountId).archived) o.accountId = P.accountId;
         else o.showSettings = true;
       }
+      // IBAN im Dateikopf → Konto steht fest (gleiches Bankformat für mehrere Konten, z. B. ING Giro + Extra-Konto)
+      var ibanAcc = C.findAccountByIbanInText(s, decode(buf, 'auto'));
+      if (ibanAcc && o.accountMode === 'fixed') {
+        o.accountId = ibanAcc.id; o.ibanAccount = true;
+        if (pm && pm.profile.accountId && pm.profile.accountId !== ibanAcc.id) {
+          // passendes Profil für genau dieses Konto bevorzugen
+          var same = (s.importProfiles || []).find(function (x) { return x.signature === pm.profile.signature && x.accountId === ibanAcc.id; });
+          if (same) { o.profileId = same.id; o.profileName = same.name; } else { o.profileId = null; o.profileName = ibanAcc.name; o.showSettings = true; }
+        }
+      }
       if (!o.profileName) o.profileName = o.accountMode === 'fixed' && acc(o.accountId) ? acc(o.accountId).name : file.name.replace(/\.[^.]+$/, '');
       var text, rows;
       function parse() {
@@ -1217,8 +1227,27 @@
                 }
               }
             }
+            // Verknüpfte Konten („Bucht nur gegen“): Gegenbuchung schon da → zusammenführen; sonst als Umbuchung anlegen
+            if (!e.dup && !e.replaces && e.accountId !== '__new' && !isNaN(e.amount) && o.useLinked !== false) {
+              var lm = C.findLinkedMatch(s, e.accountId, e.date, e.amount, usedMatch);
+              var accObj = C.findById(s.accounts, e.accountId);
+              if (lm) {
+                usedMatch[lm.txn.id] = true;
+                e.dup = true;
+                if (lm.mode === 'covered') e.covered = lm.txn; else { e.linkMerge = lm.txn; e.linkPartner = lm.partnerId; }
+              } else if (accObj && accObj.linkedAccountId && C.findById(s.accounts, accObj.linkedAccountId) && !C.isInterestRow(e.payee, e.purpose)) {
+                e.linkTo = accObj.linkedAccountId;
+                e.categoryId = null;
+              }
+            }
           }
           out.push(e);
+        });
+        // Rückbuchungspaare im selben Konto (z. B. abgelehnte Lastschrift +/-) sind keine Umbuchungen
+        out.forEach(function (e) {
+          if (!e.linkTo) return;
+          var twin = out.find(function (x) { return x !== e && x.linkTo && x.accountId === e.accountId && x.amount === -e.amount && x.payee === e.payee && Math.abs(C.diffDays(x.date, e.date)) <= 3; });
+          if (twin) { delete e.linkTo; delete twin.linkTo; }
         });
         return out;
       }
@@ -1228,7 +1257,9 @@
         var m = o.map;
         var entries = build();
         var ok = entries.filter(function (e) { return !e.errors.length && e.accountId && !e.dup; });
-        var dups = entries.filter(function (e) { return e.dup; }).length;
+        var merges = entries.filter(function (e) { return e.linkMerge; }).length;
+        var links = ok.filter(function (e) { return e.linkTo; }).length;
+        var dups = entries.filter(function (e) { return e.dup && !e.linkMerge; }).length;
         var errs = entries.filter(function (e) { return e.errors.length; }).length;
         var noAcc = entries.filter(function (e) { return !e.errors.length && !e.accountId; }).length;
         var accKeys = [];
@@ -1251,7 +1282,7 @@
         var looksDepot = /isin|wkn/.test(hdrL) && /(stück|stueck|anzahl|menge|nominal|einstand|kurswert)/.test(hdrL);
         var html = (qopts.step ? '<div class="help mb">' + esc(qopts.step) + '</div>' : '') +
           (looksDepot ? '<div class="banner info"><span class="grow"><b>Das sieht nach Depotdaten aus</b> (ISIN, Stückzahl …). Wertpapiere gehören ins Depot, nicht in die Buchungen.</span><button type="button" class="btn primary" data-depot-switch>Als Depot importieren</button></div>' : '') +
-          (o.profileId ? '<div class="banner info"><span class="grow">✓ <b>Format erkannt:</b> Profil „' + esc(o.profileName) + '“ – Einstellungen übernommen' + (o.accountMode === 'fixed' && acc(o.accountId) ? ', Konto <b>' + esc(acc(o.accountId).name) + '</b>' : '') + '.</span><button type="button" class="btn small" data-toggle-settings>' + (o.showSettings ? 'Einstellungen ausblenden' : 'Einstellungen anzeigen') + '</button></div>' : '') +
+          (o.profileId ? '<div class="banner info"><span class="grow">✓ <b>Format erkannt:</b> Profil „' + esc(o.profileName) + '“ – Einstellungen übernommen' + (o.accountMode === 'fixed' && acc(o.accountId) ? ', Konto <b>' + esc(acc(o.accountId).name) + '</b>' + (o.ibanAccount ? ' (per IBAN)' : '') : '') + '.</span><button type="button" class="btn small" data-toggle-settings>' + (o.showSettings ? 'Einstellungen ausblenden' : 'Einstellungen anzeigen') + '</button></div>' : '') +
           '<div' + (o.showSettings ? '' : ' style="display:none"') + '><div class="grid two"><div><div class="form-grid">' +
           '<label>Datei</label><div class="ellipsis">' + esc(file.name) + '</div>' +
           '<label>Zeichensatz</label><select data-o="enc"><option value="auto"' + sel('auto', o.enc) + '>automatisch</option><option value="utf-8"' + sel('utf-8', o.enc) + '>UTF-8</option><option value="windows-1252"' + sel('windows-1252', o.enc) + '>Windows (ANSI)</option></select>' +
@@ -1282,19 +1313,19 @@
           '<hr class="sep"><div class="row"><label class="chk" title="Beim nächsten Import dieser Bank werden Spalten, Konto und Optionen automatisch übernommen"><input type="checkbox" data-o="saveProfile"' + (o.saveProfile ? ' checked' : '') + '> Als Import-Profil merken:</label>' +
           '<input type="text" data-o="profileName" value="' + esc(o.profileName) + '" style="width:240px" placeholder="z. B. Sparkasse Giro">' +
           '<span class="help">Nächstes Mal: Datei rein, ein Klick.</span></div>';
-        html += '<div class="summary-line" style="padding-left:0;border:0"><span><b>' + ok.length + '</b> werden importiert</span>' + (dups ? '<span><b>' + dups + '</b> schon vorhanden, übersprungen</span>' : '') + (entries.filter(function (e) { return e.replaces; }).length ? '<span title="Ersetzt die automatisch gebuchten Daueraufträge bzw. Handeinträge – mit deren Kategorie"><b>' + entries.filter(function (e) { return e.replaces; }).length + '</b> ersetzen geplante Einträge</span>' : '') + (errs ? '<span class="neg"><b>' + errs + '</b> fehlerhaft (Datum/Betrag)</span>' : '') + (noAcc ? '<span><b>' + noAcc + '</b> ohne Konto übersprungen</span>' : '') + '</div>';
+        html += '<div class="summary-line" style="padding-left:0;border:0"><span><b>' + ok.length + '</b> werden importiert</span>' + (links ? '<span title="Konto bucht nur gegen ein anderes Konto (Kontoeinstellung)"><b>' + links + '</b> davon als Umbuchung</span>' : '') + (merges ? '<span title="Gegenbuchung ist schon importiert – beide werden zu einer Umbuchung"><b>' + merges + '</b> mit Gegenbuchung zusammengeführt</span>' : '') + (dups ? '<span><b>' + dups + '</b> schon vorhanden, übersprungen</span>' : '') + (entries.filter(function (e) { return e.replaces; }).length ? '<span title="Ersetzt die automatisch gebuchten Daueraufträge bzw. Handeinträge – mit deren Kategorie"><b>' + entries.filter(function (e) { return e.replaces; }).length + '</b> ersetzen geplante Einträge</span>' : '') + (errs ? '<span class="neg"><b>' + errs + '</b> fehlerhaft (Datum/Betrag)</span>' : '') + (noAcc ? '<span><b>' + noAcc + '</b> ohne Konto übersprungen</span>' : '') + '</div>';
         html += '<div class="tbl-wrap" style="max-height:38vh"><table class="tbl"><thead><tr><th>Zeile</th><th>Datum</th>' + (o.accountMode === 'column' ? '<th>Konto</th>' : '') + '<th>Empfänger</th><th>Zweck</th><th>Kategorie</th><th class="num">Betrag</th><th></th></tr></thead><tbody>' +
           entries.slice(0, 60).map(function (e) {
-            var catTxt = e.categoryId ? App.h.catLabel(e.categoryId) : (e.csvCat && (e.csvCat.sub || e.csvCat.main) && o.createCats ? '<span class="badge">neu: ' + esc(e.csvCat.sub || e.csvCat.main) + '</span>' : '<span class="muted">–</span>');
-            var st = e.errors.length ? '<span class="badge warn">Fehler: ' + e.errors.join(', ') + '</span>' : (e.covered ? '<span class="badge" title="' + esc(e.covered.payee || '') + ' (' + C.formatDate(e.covered.date) + ')">schon erfasst</span>' : e.dup ? '<span class="badge">Duplikat</span>' : (!e.accountId ? '<span class="badge">übersprungen</span>' : (e.replaces ? '<span class="badge accent" title="ersetzt: ' + esc(e.replaces.payee || '') + ' (' + C.formatDate(e.replaces.date) + ')">ersetzt ' + (e.replaces.recurringId ? 'Dauerauftrag' : 'Eintrag') + '</span>' : '')));
+            var catTxt = e.linkTo || e.linkMerge ? '<span class="muted">Umbuchung</span>' : e.categoryId ? App.h.catLabel(e.categoryId) : (e.csvCat && (e.csvCat.sub || e.csvCat.main) && o.createCats ? '<span class="badge">neu: ' + esc(e.csvCat.sub || e.csvCat.main) + '</span>' : '<span class="muted">–</span>');
+            var st = e.errors.length ? '<span class="badge warn">Fehler: ' + e.errors.join(', ') + '</span>' : e.linkMerge ? '<span class="badge accent" title="Gegenbuchung auf ' + esc(accName(e.linkPartner)) + ' vom ' + C.formatDate(e.linkMerge.date) + ' wird zur Umbuchung">↔ ' + esc(accName(e.linkPartner)) + ' zusammengeführt</span>' : e.linkTo && !e.dup ? '<span class="badge accent">Umbuchung ↔ ' + esc(accName(e.linkTo)) + '</span>' : (e.covered ? '<span class="badge" title="' + esc(e.covered.payee || '') + ' (' + C.formatDate(e.covered.date) + ')">schon erfasst</span>' : e.dup ? '<span class="badge">Duplikat</span>' : (!e.accountId ? '<span class="badge">übersprungen</span>' : (e.replaces ? '<span class="badge accent" title="ersetzt: ' + esc(e.replaces.payee || '') + ' (' + C.formatDate(e.replaces.date) + ')">ersetzt ' + (e.replaces.recurringId ? 'Dauerauftrag' : 'Eintrag') + '</span>' : '')));
             return '<tr class="' + (e.dup || e.errors.length || !e.accountId ? 'muted' : '') + '"><td class="small">' + e.line + '</td><td class="nowrap">' + (e.date ? C.formatDate(e.date) : esc(e.raw[m.date] || '')) + '</td>' +
               (o.accountMode === 'column' ? '<td class="small">' + esc(e.accountId && e.accountId !== '__new' ? accName(e.accountId) : (e.accKey || '')) + '</td>' : '') +
               '<td class="ellipsis" style="max-width:180px">' + esc(e.payee) + '</td><td class="small ellipsis" style="max-width:220px">' + esc(e.purpose) + '</td><td>' + catTxt + '</td><td class="num">' + (isNaN(e.amount) ? '–' : money(e.amount, { color: true })) + '</td><td>' + st + '</td></tr>';
           }).join('') + (entries.length > 60 ? '<tr class="muted"><td colspan="8">… ' + (entries.length - 60) + ' weitere Zeilen</td></tr>' : '') + '</tbody></table></div>';
         $('.modal-body', form).innerHTML = html;
         var btn = $('button[type=submit]', form);
-        btn.textContent = ok.length + ' Buchungen importieren';
-        btn.disabled = !ok.length;
+        btn.textContent = ok.length || !merges ? ok.length + ' Buchungen importieren' : merges + ' Umbuchungen zusammenführen';
+        btn.disabled = !ok.length && !merges;
         var sw = $('[data-depot-switch]', form);
         if (sw) sw.onclick = function () { App.closeModal(); App.depotCsvImport(file, qopts); };
         var ts = $('[data-toggle-settings]', form);
@@ -1337,7 +1368,8 @@
           var all = build();
           var entries = all.filter(function (e) { return !e.errors.length && e.accountId && !e.dup; });
           var coveredRows = all.filter(function (e) { return e.covered; });
-          if (!entries.length) {
+          var mergeRows = all.filter(function (e) { return e.linkMerge; });
+          if (!entries.length && !mergeRows.length) {
             if (qopts.onSkip) { App.closeModal(); qopts.onSkip(); }
             return false;
           }
@@ -1366,6 +1398,7 @@
               }
               var note = [e.noteCol, o.purposeToNote && e.purpose && e.purpose !== e.payee ? e.purpose : ''].filter(Boolean).join(' · ');
               var tx = { id: C.uid(), date: e.date, accountId: accountId, counterAccountId: null, amount: e.amount, payee: e.payee, categoryId: catId || null, note: note, tags: [], imported: true };
+              if (e.linkTo) C.toTransfer(tx, e.linkTo);
               if (e.replaces) {
                 // Bankzeile ersetzt den geplanten Eintrag: Kategorie, Dauerauftrag-Bezug und Markierungen bleiben
                 var old = C.findById(st.transactions, e.replaces.id);
@@ -1382,6 +1415,14 @@
               st.transactions.push(tx);
               newIds.push(tx.id);
               touched[accountId] = true;
+            });
+            // Gegenbuchung auf dem verknüpften Konto → eine Umbuchung statt zwei Einzelbuchungen
+            mergeRows.forEach(function (e) {
+              var t = C.findById(st.transactions, e.linkMerge.id);
+              if (!t) return;
+              C.toTransfer(t, e.accountId);
+              if (!t.note && e.purpose && e.purpose !== e.payee) t.note = e.purpose;
+              touched[e.accountId] = true;
             });
             Object.keys(touched).forEach(function (id) { var a = C.findById(st.accounts, id); if (a) a.lastImport = today(); });
             // bereits erfasste Umbuchungen/Kreditraten: Datum an die Bank angleichen
@@ -1413,7 +1454,7 @@
           if (openCount) setTimeout(function () {
             App.toast(openCount + ' importierte Buchungen ohne Kategorie.', { action: { label: 'Jetzt zuordnen', fn: function () { App.quickCategorize(); } } });
           }, 400);
-          App.toast(entries.length + ' Buchungen importiert' + (created.acc ? ', ' + created.acc + ' Konten angelegt' : '') + (created.cat ? ', ' + created.cat + ' Kategorien angelegt' : '') + '.', { undo: true });
+          App.toast(entries.length + ' Buchungen importiert' + (mergeRows.length ? ', ' + mergeRows.length + ' Umbuchungen zusammengeführt' : '') + (created.acc ? ', ' + created.acc + ' Konten angelegt' : '') + (created.cat ? ', ' + created.cat + ' Kategorien angelegt' : '') + '.', { undo: true });
           if (created.acc) setTimeout(function () { App.toast('Tipp: Bei neuen Konten den Anfangsbestand über „Abgleichen“ setzen.'); }, 800);
         }
       });

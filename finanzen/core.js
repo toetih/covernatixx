@@ -883,7 +883,9 @@
       var m = c.parentId ? cat(c.parentId) : c;
       var multi = m && usedSubs[m.id] && Object.keys(usedSubs[m.id]).length > 1;
       // Schlüssel immer die Unterkategorie (stabil über Monate), Name der Hauptkategorie, wenn sie diesen Monat nur eine hat
-      return { key: c.id, label: multi && c.parentId ? c.name : m.name, main: m };
+      var lbl = multi && c.parentId ? c.name : m.name;
+      if (priv && m && m.business) lbl = m.name + ' – aufs Privatkonto';   // Geschäftseinnahme direkt aufs Privatkonto
+      return { key: c.id, label: lbl, main: m };
     }
     function item(t, v, isPlanned, fixed) {
       return { id: t.id || null, date: t.date, payee: t.payee || (t.ruleId ? (findById(state.recurring, t.ruleId) || {}).name : '') || '', amount: v, categoryId: t.categoryId || null, planned: !!isPlanned, fixed: !!fixed };

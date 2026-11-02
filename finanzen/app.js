@@ -701,7 +701,7 @@
         var o = mb.byMain[mid], c = mid === '__loans' ? null : cat(mid);
         var fixed = Math.max(o.fixed + o.plannedFixed, 0), v = fixed + o.variable + (o.plannedVariable || 0);
         if (v <= 0 && !(c && budgetFor(c)) && !(avgMain[mid] >= 5000)) return;
-        rows.push({ id: mid, name: mid === '__loans' ? 'Kreditraten' : (c ? c.name : 'Ohne Kategorie'), color: mid === '__loans' ? 'var(--series-2)' : (c ? c.color : '#999'),
+        rows.push({ id: mid, name: mid === '__loans' ? 'Kreditraten' : (c ? c.name + (c.business ? ' – privat bezahlt' : '') : 'Ohne Kategorie'), color: mid === '__loans' ? 'var(--series-2)' : (c ? c.color : '#999'),
           v: Math.max(v, 0), fixed: Math.min(fixed, Math.max(v, 0)), planned: o.plannedFixed + (o.plannedVariable || 0), budget: c ? budgetFor(c) : 0, items: o.items, avg: Math.round(avgMain[mid] || 0) });
       });
       // Kategorien, die üblicherweise Ausgaben haben, diesen Monat aber noch nicht (z. B. Lebensmittel am Monatsanfang)

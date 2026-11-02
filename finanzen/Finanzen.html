@@ -1265,7 +1265,9 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       var m = c.parentId ? cat(c.parentId) : c;
       var multi = m && usedSubs[m.id] && Object.keys(usedSubs[m.id]).length > 1;
       // Schlüssel immer die Unterkategorie (stabil über Monate), Name der Hauptkategorie, wenn sie diesen Monat nur eine hat
-      return { key: c.id, label: multi && c.parentId ? c.name : m.name, main: m };
+      var lbl = multi && c.parentId ? c.name : m.name;
+      if (priv && m && m.business) lbl = m.name + ' – aufs Privatkonto';   // Geschäftseinnahme direkt aufs Privatkonto
+      return { key: c.id, label: lbl, main: m };
     }
     function item(t, v, isPlanned, fixed) {
       return { id: t.id || null, date: t.date, payee: t.payee || (t.ruleId ? (findById(state.recurring, t.ruleId) || {}).name : '') || '', amount: v, categoryId: t.categoryId || null, planned: !!isPlanned, fixed: !!fixed };
@@ -3114,7 +3116,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
         var o = mb.byMain[mid], c = mid === '__loans' ? null : cat(mid);
         var fixed = Math.max(o.fixed + o.plannedFixed, 0), v = fixed + o.variable + (o.plannedVariable || 0);
         if (v <= 0 && !(c && budgetFor(c)) && !(avgMain[mid] >= 5000)) return;
-        rows.push({ id: mid, name: mid === '__loans' ? 'Kreditraten' : (c ? c.name : 'Ohne Kategorie'), color: mid === '__loans' ? 'var(--series-2)' : (c ? c.color : '#999'),
+        rows.push({ id: mid, name: mid === '__loans' ? 'Kreditraten' : (c ? c.name + (c.business ? ' – privat bezahlt' : '') : 'Ohne Kategorie'), color: mid === '__loans' ? 'var(--series-2)' : (c ? c.color : '#999'),
           v: Math.max(v, 0), fixed: Math.min(fixed, Math.max(v, 0)), planned: o.plannedFixed + (o.plannedVariable || 0), budget: c ? budgetFor(c) : 0, items: o.items, avg: Math.round(avgMain[mid] || 0) });
       });
       // Kategorien, die üblicherweise Ausgaben haben, diesen Monat aber noch nicht (z. B. Lebensmittel am Monatsanfang)
@@ -4706,7 +4708,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       });
       rowsOut.sort(function (a, b) { return sec[0] === 'income' ? b.total - a.total : a.total - b.total; });
       rowsOut.forEach(function (r) {
-        html += row(r.node.cat.name, r.data, { cat: r.node.cat.id, pdata: P.byMain[r.node.cat.id], dot: r.node.cat.color, cls: f.detail && r.node.children.length ? 'bold' : '', budget: sec[0] === 'expense' ? App.budgetFor(r.node.cat) : 0 });
+        html += row(r.node.cat.name + (f.account === '__household' && r.node.cat.business ? (sec[0] === 'expense' ? ' – privat bezahlt' : ' – aufs Privatkonto') : ''), r.data, { cat: r.node.cat.id, pdata: P.byMain[r.node.cat.id], dot: r.node.cat.color, cls: f.detail && r.node.children.length ? 'bold' : '', budget: sec[0] === 'expense' ? App.budgetFor(r.node.cat) : 0 });
         if (f.detail) {
           if (rep.byCat[r.node.cat.id] && r.node.children.length) html += row('(allgemein)', rep.byCat[r.node.cat.id], { cat: r.node.cat.id, pdata: P.byCat[r.node.cat.id], sub: true });
           r.node.children.forEach(function (c) { if (rep.byCat[c.id]) html += row(c.name, rep.byCat[c.id], { cat: c.id, pdata: P.byCat[c.id], sub: true, budget: sec[0] === 'expense' ? c.budget : 0 }); });

@@ -720,7 +720,7 @@
       });
       rowsOut.sort(function (a, b) { return sec[0] === 'income' ? b.total - a.total : a.total - b.total; });
       rowsOut.forEach(function (r) {
-        html += row(r.node.cat.name, r.data, { cat: r.node.cat.id, pdata: P.byMain[r.node.cat.id], dot: r.node.cat.color, cls: f.detail && r.node.children.length ? 'bold' : '', budget: sec[0] === 'expense' ? App.budgetFor(r.node.cat) : 0 });
+        html += row(r.node.cat.name + (f.account === '__household' && r.node.cat.business ? (sec[0] === 'expense' ? ' – privat bezahlt' : ' – aufs Privatkonto') : ''), r.data, { cat: r.node.cat.id, pdata: P.byMain[r.node.cat.id], dot: r.node.cat.color, cls: f.detail && r.node.children.length ? 'bold' : '', budget: sec[0] === 'expense' ? App.budgetFor(r.node.cat) : 0 });
         if (f.detail) {
           if (rep.byCat[r.node.cat.id] && r.node.children.length) html += row('(allgemein)', rep.byCat[r.node.cat.id], { cat: r.node.cat.id, pdata: P.byCat[r.node.cat.id], sub: true });
           r.node.children.forEach(function (c) { if (rep.byCat[c.id]) html += row(c.name, rep.byCat[c.id], { cat: c.id, pdata: P.byCat[c.id], sub: true, budget: sec[0] === 'expense' ? c.budget : 0 }); });

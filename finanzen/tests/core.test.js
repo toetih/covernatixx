@@ -471,3 +471,38 @@ test('Import-Profil erkennt Bankformat trotz wechselndem Vorspann', () => {
   assert.equal(C.findImportProfile(s, 'Datum;Betrag\n01.01.2025;1', 'tx'), null);
   assert.equal(C.findImportProfile(s, text, 'depot'), null);
 });
+
+test('Import-Abgleich: Dauerauftrag ersetzen, Umbuchung/Kredit abdecken, Handeintrag erkennen', () => {
+  const s = baseState();
+  s.transactions.push({ id: 'rec', date: '2025-03-01', accountId: 'giro', amount: -12300, payee: 'Strom Praxis', categoryId: 'strom', recurringId: 'r1', tags: [] });
+  s.transactions.push({ id: 'tr', date: '2025-03-05', accountId: 'giro', counterAccountId: 'tg', amount: -40000, payee: 'Sparen', recurringId: 'r2', tags: [] });
+  s.transactions.push({ id: 'man', date: '2025-03-10', accountId: 'giro', amount: -4520, payee: 'REWE', categoryId: 'food', tags: [] });
+  s.transactions.push({ id: 'imp', date: '2025-03-12', accountId: 'giro', amount: -999, payee: 'X', imported: true, tags: [] });
+  let m = C.findBookingMatch(s, 'giro', '2025-03-03', -12300);
+  assert.deepEqual([m.txn.id, m.mode], ['rec', 'replace']);
+  m = C.findBookingMatch(s, 'giro', '2025-03-06', -40000);
+  assert.deepEqual([m.txn.id, m.mode], ['tr', 'covered']);
+  m = C.findBookingMatch(s, 'tg', '2025-03-06', 40000);              // Gegenseite der Umbuchung
+  assert.deepEqual([m.txn.id, m.mode], ['tr', 'covered']);
+  m = C.findBookingMatch(s, 'giro', '2025-03-11', -4520);
+  assert.equal(m.txn.id, 'man');
+  assert.equal(C.findBookingMatch(s, 'giro', '2025-03-20', -4520), null);   // Handeintrag: max. ±3 Tage
+  assert.equal(C.findBookingMatch(s, 'giro', '2025-03-12', -999), null);    // schon importiert
+  assert.equal(C.findBookingMatch(s, 'giro', '2025-03-03', -12300, { rec: true }), null);
+});
+
+test('Gruppen-Abgleich: zwei Verträge in einer Lastschrift, Gehalt mit Sonderzahlung', () => {
+  assert.equal(C.learnKey('1&1'), '1und1');
+  assert.equal(C.learnKey('1+1 Telecom GmbH'), '1und1');
+  const s = baseState();
+  s.transactions.push({ id: 'a', date: '2026-10-08', accountId: 'giro', amount: -2999, payee: '1+1 Telecom GmbH', categoryId: 'tz', recurringId: 'r1', tags: [] });
+  s.transactions.push({ id: 'b', date: '2026-10-08', accountId: 'giro', amount: -3999, payee: '1+1 Telecom GmbH', categoryId: 'tp', recurringId: 'r2', tags: [] });
+  s.transactions.push({ id: 'g1', date: '2026-10-29', accountId: 'giro', amount: 447762, payee: 'Wilh.Schlechtendahl + Sohne GmbH', recurringId: 'r3', tags: [] });
+  s.transactions.push({ id: 'g2', date: '2026-10-29', accountId: 'giro', amount: 300000, payee: 'Wilh.Schlechtendahl + Sohne GmbH', recurringId: 'r4', tags: [] });
+  assert.equal(C.findBookingMatch(s, 'giro', '2026-10-07', -6998), null);
+  let g = C.findRecurringGroup(s, 'giro', '2026-10-07', -6998, '1&1');
+  assert.deepEqual([g.txns.map(t => t.id).sort().join(), g.exact], ['a,b', true]);
+  g = C.findRecurringGroup(s, 'giro', '2026-10-29', 763407, 'Wilh. Schlechtendahl & Soehne');
+  assert.deepEqual([g.txns.length, g.exact], [2, false]);
+  assert.equal(C.findRecurringGroup(s, 'giro', '2026-10-29', 763407, 'Andere Firma'), null);
+});

@@ -986,7 +986,9 @@
    * „Aral Station 0815“ → „aral“). Bei kurzen oder mehrdeutigen Anfängen zwei Wörter („dm drogerie“, „deutsche bahn“).
    */
   function learnKey(payee) {
-    var words = normText(payee).split(' ').filter(function (w) { return w.length > 1 && !/^\d+$/.test(w) && !LEARN_STOP[w]; });
+    // „1&1“, „1+1“, „1 und 1“ → „1und1“ (sonst fallen die Ziffern weg)
+    var p = String(payee || '').replace(/(\d)\s*(?:&|\+|und)\s*(\d)/gi, '$1und$2');
+    var words = normText(p).split(' ').filter(function (w) { return w.length > 1 && !/^\d+$/.test(w) && !LEARN_STOP[w]; });
     if (!words.length || LEARN_GENERIC[words[0]]) return null;
     var key = (words[0].length < 4 || LEARN_AMBIG[words[0]]) ? words.slice(0, 2).join(' ') : words[0];
     return key.length >= 3 ? key : null;
@@ -1283,6 +1285,45 @@
     return null;
   }
 
+  /**
+   * Bereits erfasste Buchung zu einer Bankbewegung finden (gegen Doppelungen beim Import):
+   * gleicher Betrag aus Sicht des Kontos, Datum nah dran, noch nicht aus Bankdaten importiert.
+   * Daueraufträge, Umbuchungen, Kredit- und Depotbuchungen: ±6 Tage; Handeinträge: ±3 Tage.
+   * Rückgabe: { txn, mode } – mode 'replace' (Bankzeile ersetzt den Eintrag, Kategorie bleibt)
+   *           oder 'covered' (Eintrag bleibt, Bankzeile wird nicht importiert) – oder null.
+   */
+  function findBookingMatch(state, accountId, dateIso, amount, used) {
+    var best = null, bestD = Infinity;
+    for (var i = 0; i < state.transactions.length; i++) {
+      var t = state.transactions[i];
+      if ((used && used[t.id]) || t.imported || t.extId) continue;
+      if (effectOn(t, accountId) !== amount) continue;
+      var structured = !!(t.recurringId || t.counterAccountId || t.tradeId || t.loanPart);
+      var d = Math.abs(diffDays(t.date, dateIso));
+      if (d <= (structured ? 6 : 3) && d < bestD) { best = t; bestD = d; }
+    }
+    if (!best) return null;
+    return { txn: best, mode: (best.counterAccountId || best.tradeId || best.loanPart) ? 'covered' : 'replace' };
+  }
+
+  /**
+   * Geplante Dauerauftrags-Buchungen desselben Empfängers rund um eine Bankbuchung
+   * (z. B. Grundgehalt + Sonderzahlung in einer Überweisung, zwei 1&1-Verträge in einer Lastschrift).
+   * Rückgabe: { txns, exact } – exact = Summe passt centgenau – oder null.
+   */
+  function findRecurringGroup(state, accountId, dateIso, amount, payee, used) {
+    var key = learnKey(payee);
+    if (!key) return null;
+    var list = state.transactions.filter(function (t) {
+      return !(used && used[t.id]) && !t.imported && !t.extId && t.recurringId && !t.counterAccountId && !t.tradeId && !t.loanPart &&
+        t.accountId === accountId && (t.amount < 0) === (amount < 0) && learnKey(t.payee) === key && Math.abs(diffDays(t.date, dateIso)) <= 6;
+    });
+    if (!list.length) return null;
+    var sum = 0;
+    list.forEach(function (t) { sum += t.amount; });
+    return { txns: list, exact: sum === amount };
+  }
+
   /** Einheitlicher Schlüssel für Duplikaterkennung. */
   function dupKey(accountId, date, amount, payee) {
     return accountId + '|' + date + '|' + amount + '|' + String(payee || '').trim().toLowerCase().slice(0, 24);
@@ -1544,7 +1585,7 @@
     headerSignature: headerSignature, findImportProfile: findImportProfile,
     // CSV
     parseCSV: parseCSV, detectDelimiter: detectDelimiter, detectHeaderRow: detectHeaderRow, guessMapping: guessMapping,
-    dupKey: dupKey, toCSV: toCSV, guessDepotMapping: guessDepotMapping, parseTradeType: parseTradeType, findSecurity: findSecurity, findTransferPairs: findTransferPairs, mergeTransferPair: mergeTransferPair,
+    dupKey: dupKey, toCSV: toCSV, findBookingMatch: findBookingMatch, findRecurringGroup: findRecurringGroup, guessDepotMapping: guessDepotMapping, parseTradeType: parseTradeType, findSecurity: findSecurity, findTransferPairs: findTransferPairs, mergeTransferPair: mergeTransferPair,
     // Zustand
     emptyState: emptyState, normalizeState: normalizeState, demoState: demoState, defaultCategories: defaultCategories
   };

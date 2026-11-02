@@ -25,6 +25,7 @@ Tipp: In Chrome/Edge über Menü › „Streamen, speichern und teilen“ › �
 
 1. In jedem Online-Banking die Umsätze als **CSV** exportieren.
 2. Alle Dateien auf einmal **ins App-Fenster ziehen** (oder Übersicht › „CSV importieren …“). Beim ersten Mal ordnest du Spalten und Konto zu – die App merkt sich das als **Import-Profil**. Ab dem zweiten Monat: Datei rein, ein Klick. Depotdateien werden automatisch erkannt.
+   Beim Import gleicht die App mit deinen Daueraufträgen ab: Die echte Bankbuchung ersetzt den automatisch gebuchten Eintrag (Kategorie bleibt), Umbuchungen und Kreditraten werden nicht doppelt gebucht, Sammelbuchungen (z. B. Gehalt + Sonderzahlung, zwei Verträge in einer Lastschrift) werden erkannt.
 3. **„Jetzt zuordnen“**: offene Buchungen sind nach Empfänger gruppiert (z. B. „REWE 12×“) – eine Auswahl pro Zeile. Die App **lernt daraus Regeln**, beim nächsten Import ist das meiste schon kategorisiert.
 4. **Monatsabschluss** (Erinnerung erscheint in der Übersicht): Importe ✓, offene Buchungen ✓, Kontostände prüfen ✓, fertig.
 

@@ -1158,6 +1158,7 @@
         var existing = {};
         s.transactions.forEach(function (t) { existing[C.dupKey(t.accountId, t.date, t.amount, t.payee)] = true; });
         var seenInFile = {};
+        var usedMatch = {};
         var out = [];
         rows.slice(o.header + 1).forEach(function (r, i) {
           if (r.every(function (c) { return !String(c).trim(); })) return;
@@ -1199,6 +1200,23 @@
             e.dup = !!existing[k];
             // gleiche Zeile mehrfach in der Datei ist legitim (z. B. zwei gleiche Einkäufe) – nur gegen Bestand prüfen
             seenInFile[k] = true;
+            // Schon als Dauerauftrag, Umbuchung, Kreditrate oder per Hand erfasst?
+            if (!e.dup && e.accountId !== '__new' && !isNaN(e.amount)) {
+              var bm = C.findBookingMatch(s, e.accountId, e.date, e.amount, usedMatch);
+              if (bm) {
+                usedMatch[bm.txn.id] = true;
+                if (bm.mode === 'covered') { e.dup = true; e.covered = bm.txn; }
+                else { e.replaces = bm.txn; if (bm.txn.categoryId) e.categoryId = bm.txn.categoryId; }
+              } else {
+                // Mehrere Daueraufträge in einer Bankbuchung (z. B. Gehalt + Sonderzahlung, zwei Verträge)
+                var grp = C.findRecurringGroup(s, e.accountId, e.date, e.amount, e.payee, usedMatch);
+                if (grp) {
+                  grp.txns.forEach(function (t) { usedMatch[t.id] = true; });
+                  if (grp.exact && grp.txns.length > 1) { e.dup = true; e.covered = grp.txns[0]; e.confirmGroup = grp.txns; }
+                  else { e.replaces = grp.txns[0]; e.replaceGroup = grp.txns; if (grp.txns[0].categoryId) e.categoryId = grp.txns[0].categoryId; }
+                }
+              }
+            }
           }
           out.push(e);
         });
@@ -1264,11 +1282,11 @@
           '<hr class="sep"><div class="row"><label class="chk" title="Beim nächsten Import dieser Bank werden Spalten, Konto und Optionen automatisch übernommen"><input type="checkbox" data-o="saveProfile"' + (o.saveProfile ? ' checked' : '') + '> Als Import-Profil merken:</label>' +
           '<input type="text" data-o="profileName" value="' + esc(o.profileName) + '" style="width:240px" placeholder="z. B. Sparkasse Giro">' +
           '<span class="help">Nächstes Mal: Datei rein, ein Klick.</span></div>';
-        html += '<div class="summary-line" style="padding-left:0;border:0"><span><b>' + ok.length + '</b> werden importiert</span>' + (dups ? '<span><b>' + dups + '</b> Duplikate übersprungen</span>' : '') + (errs ? '<span class="neg"><b>' + errs + '</b> fehlerhaft (Datum/Betrag)</span>' : '') + (noAcc ? '<span><b>' + noAcc + '</b> ohne Konto übersprungen</span>' : '') + '</div>';
+        html += '<div class="summary-line" style="padding-left:0;border:0"><span><b>' + ok.length + '</b> werden importiert</span>' + (dups ? '<span><b>' + dups + '</b> schon vorhanden, übersprungen</span>' : '') + (entries.filter(function (e) { return e.replaces; }).length ? '<span title="Ersetzt die automatisch gebuchten Daueraufträge bzw. Handeinträge – mit deren Kategorie"><b>' + entries.filter(function (e) { return e.replaces; }).length + '</b> ersetzen geplante Einträge</span>' : '') + (errs ? '<span class="neg"><b>' + errs + '</b> fehlerhaft (Datum/Betrag)</span>' : '') + (noAcc ? '<span><b>' + noAcc + '</b> ohne Konto übersprungen</span>' : '') + '</div>';
         html += '<div class="tbl-wrap" style="max-height:38vh"><table class="tbl"><thead><tr><th>Zeile</th><th>Datum</th>' + (o.accountMode === 'column' ? '<th>Konto</th>' : '') + '<th>Empfänger</th><th>Zweck</th><th>Kategorie</th><th class="num">Betrag</th><th></th></tr></thead><tbody>' +
           entries.slice(0, 60).map(function (e) {
             var catTxt = e.categoryId ? App.h.catLabel(e.categoryId) : (e.csvCat && (e.csvCat.sub || e.csvCat.main) && o.createCats ? '<span class="badge">neu: ' + esc(e.csvCat.sub || e.csvCat.main) + '</span>' : '<span class="muted">–</span>');
-            var st = e.errors.length ? '<span class="badge warn">Fehler: ' + e.errors.join(', ') + '</span>' : (e.dup ? '<span class="badge">Duplikat</span>' : (!e.accountId ? '<span class="badge">übersprungen</span>' : ''));
+            var st = e.errors.length ? '<span class="badge warn">Fehler: ' + e.errors.join(', ') + '</span>' : (e.covered ? '<span class="badge" title="' + esc(e.covered.payee || '') + ' (' + C.formatDate(e.covered.date) + ')">schon erfasst</span>' : e.dup ? '<span class="badge">Duplikat</span>' : (!e.accountId ? '<span class="badge">übersprungen</span>' : (e.replaces ? '<span class="badge accent" title="ersetzt: ' + esc(e.replaces.payee || '') + ' (' + C.formatDate(e.replaces.date) + ')">ersetzt ' + (e.replaces.recurringId ? 'Dauerauftrag' : 'Eintrag') + '</span>' : '')));
             return '<tr class="' + (e.dup || e.errors.length || !e.accountId ? 'muted' : '') + '"><td class="small">' + e.line + '</td><td class="nowrap">' + (e.date ? C.formatDate(e.date) : esc(e.raw[m.date] || '')) + '</td>' +
               (o.accountMode === 'column' ? '<td class="small">' + esc(e.accountId && e.accountId !== '__new' ? accName(e.accountId) : (e.accKey || '')) + '</td>' : '') +
               '<td class="ellipsis" style="max-width:180px">' + esc(e.payee) + '</td><td class="small ellipsis" style="max-width:220px">' + esc(e.purpose) + '</td><td>' + catTxt + '</td><td class="num">' + (isNaN(e.amount) ? '–' : money(e.amount, { color: true })) + '</td><td>' + st + '</td></tr>';
@@ -1316,7 +1334,9 @@
         title: 'CSV-Import', body: '', wide: true, submitLabel: 'Importieren',
         extraButtons: qopts.onSkip ? [{ label: 'Überspringen', onClick: function () { App.closeModal(); qopts.onSkip(); } }] : [],
         onSubmit: function () {
-          var entries = build().filter(function (e) { return !e.errors.length && e.accountId && !e.dup; });
+          var all = build();
+          var entries = all.filter(function (e) { return !e.errors.length && e.accountId && !e.dup; });
+          var coveredRows = all.filter(function (e) { return e.covered; });
           if (!entries.length) {
             if (qopts.onSkip) { App.closeModal(); qopts.onSkip(); }
             return false;
@@ -1346,11 +1366,33 @@
               }
               var note = [e.noteCol, o.purposeToNote && e.purpose && e.purpose !== e.payee ? e.purpose : ''].filter(Boolean).join(' · ');
               var tx = { id: C.uid(), date: e.date, accountId: accountId, counterAccountId: null, amount: e.amount, payee: e.payee, categoryId: catId || null, note: note, tags: [], imported: true };
+              if (e.replaces) {
+                // Bankzeile ersetzt den geplanten Eintrag: Kategorie, Dauerauftrag-Bezug und Markierungen bleiben
+                var old = C.findById(st.transactions, e.replaces.id);
+                if (old) {
+                  if (old.recurringId) tx.recurringId = old.recurringId;
+                  if (old.nextMonth) tx.nextMonth = true;
+                  if (old.tags && old.tags.length) tx.tags = old.tags.slice();
+                  var gone = {};
+                  gone[old.id] = true;
+                  (e.replaceGroup || []).forEach(function (g) { gone[g.id] = true; });
+                  st.transactions = st.transactions.filter(function (x) { return !gone[x.id]; });
+                }
+              }
               st.transactions.push(tx);
               newIds.push(tx.id);
               touched[accountId] = true;
             });
             Object.keys(touched).forEach(function (id) { var a = C.findById(st.accounts, id); if (a) a.lastImport = today(); });
+            // bereits erfasste Umbuchungen/Kreditraten: Datum an die Bank angleichen
+            coveredRows.forEach(function (e) {
+              (e.confirmGroup || [e.covered]).forEach(function (c) {
+                var t = C.findById(st.transactions, c.id);
+                if (!t) return;
+                t.date = e.date;
+                if (e.confirmGroup) { t.imported = true; t.note = [t.note, 'Teil der Bankbuchung ' + e.payee + ' ' + C.formatMoney(e.amount)].filter(Boolean).join(' · '); }
+              });
+            });
             if (o.saveProfile && rows[o.header]) {
               if (!st.importProfiles) st.importProfiles = [];
               var accMap = {};

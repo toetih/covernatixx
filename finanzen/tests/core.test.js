@@ -562,6 +562,6 @@ test('Re-Import: schon importierte Buchung wird trotz anderer Schreibweise erkan
   const d1 = C.findImportedDuplicate(s, 'giro', '2026-08-11', -1999, 'AMAZON EU S.A.R.L.', used);
   assert.equal(d1.id, 'a'); used[d1.id] = true;
   assert.equal(C.findImportedDuplicate(s, 'giro', '2026-08-10', -1999, 'Amazon', used), null);  // zweiter gleicher Einkauf → neu
-  assert.equal(C.findImportedDuplicate(s, 'tg', '2026-08-12', 20000, 'Hillmann', {}).id, 'tr'); // Gegenseite einer Umbuchung
+  assert.equal(C.findImportedDuplicate(s, 'tg', '2026-08-12', 20000, 'Muster', {}).id, 'tr'); // Gegenseite einer Umbuchung
   assert.equal(C.findImportedDuplicate(s, 'giro', '2026-08-20', -450, 'Bäckerei', {}), null);   // > 3 Tage
 });

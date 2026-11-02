@@ -536,6 +536,17 @@
     return true;
   }
 
+  /** Kategorie (oder ihre Hauptkategorie) ist als „nicht in Auswertung“ markiert – z. B. Auslagen für andere. */
+  function categoryExcluded(state, id) {
+    var c = id && findById(state.categories, id);
+    if (!c) return false;
+    if (c.excludeFromReports) return true;
+    var p = c.parentId && findById(state.categories, c.parentId);
+    return !!(p && p.excludeFromReports);
+  }
+  /** Zählt in Auswertungen: Einnahme/Ausgabe und Kategorie nicht ausgenommen. */
+  function isReportable(state, t) { return isIncomeExpense(t) && !categoryExcluded(state, t.categoryId); }
+
   function txType(t) {
     if (t.counterAccountId) return 'transfer';
     if (t.tradeId) return t.tradeType === 'dividend' ? 'income' : 'trade';
@@ -780,7 +791,7 @@
    */
   function categoryUsage(state) {
     var u = {};
-    state.categories.forEach(function (c) { u[c.id] = { tx: 0, last: null, recurring: 0, rules: 0, loans: 0, budget: !!c.budget }; });
+    state.categories.forEach(function (c) { u[c.id] = { id: c.id, tx: 0, last: null, recurring: 0, rules: 0, loans: 0, budget: !!c.budget }; });
     state.transactions.forEach(function (t) {
       var x = u[t.categoryId];
       if (!x) return;
@@ -881,7 +892,7 @@
       if (cid === '__none') add(b.none, amount >= 0 ? 'income' : 'expense', m, amount);
     }
     state.transactions.forEach(function (t) {
-      if (!isIncomeExpense(t)) return;
+      if (!isReportable(state, t)) return;
       var m = reportMonth(t);
       if (m < fromM || m > toM) return;
       if (accSet && !accSet[t.accountId]) return;
@@ -892,6 +903,7 @@
         var m = reportMonth(e);
         if (m < fromM || m > toM) return;
         if (accSet && !accSet[e.accountId]) return;
+        if (categoryExcluded(state, e.categoryId)) return;
         book(all, m, e.amount, e.categoryId);
         book(plan, m, e.amount, e.categoryId);
       });
@@ -929,7 +941,7 @@
     var sum = 0;
     var fromM = monthKey(from), toM = monthKey(to);
     state.transactions.forEach(function (t) {
-      if (!isIncomeExpense(t)) return;
+      if (!isReportable(state, t)) return;
       var m = reportMonth(t);
       if (m < fromM || m > toM) return;
       if (accSet && !accSet[t.accountId]) return;
@@ -1666,7 +1678,7 @@
     loanDebt: loanDebt, loanSchedule: loanSchedule, loanStats: loanStats, loanRule: loanRule, loanRate: loanRate, skipNext: skipNext,
     upcoming: upcoming, forecastBalances: forecastBalances,
     // Konten
-    findById: findById, effectOn: effectOn, isTransfer: isTransfer, isIncomeExpense: isIncomeExpense, txType: txType,
+    findById: findById, effectOn: effectOn, isTransfer: isTransfer, isIncomeExpense: isIncomeExpense, isReportable: isReportable, categoryExcluded: categoryExcluded, txType: txType,
     accountBalance: accountBalance, allBalances: allBalances, cashBalance: cashBalance, reconcileAccount: reconcileAccount, netWorth: netWorth, netWorthHistory: netWorthHistory,
     sortedAccounts: sortedAccounts, accountGroups: accountGroups, ACCOUNT_TYPES: ACCOUNT_TYPES,
     // Depots

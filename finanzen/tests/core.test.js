@@ -565,3 +565,21 @@ test('Re-Import: schon importierte Buchung wird trotz anderer Schreibweise erkan
   assert.equal(C.findImportedDuplicate(s, 'tg', '2026-08-12', 20000, 'Muster', {}).id, 'tr'); // Gegenseite einer Umbuchung
   assert.equal(C.findImportedDuplicate(s, 'giro', '2026-08-20', -450, 'Bäckerei', {}), null);   // > 3 Tage
 });
+
+test('Kategorie „nicht in Auswertung“: Buchungen und Planwerte zählen nicht, Kontostand schon', () => {
+  const s = baseState();
+  const inc = s.categories.find(c => c.type === 'income' && !c.parentId);
+  const exp = s.categories.find(c => c.type === 'expense' && !c.parentId);
+  const sub = { id: 'aus', name: 'Auslagen', parentId: exp.id, type: 'expense' };
+  s.categories.push(sub, { id: 'rueck', name: 'Rückzahlung', parentId: inc.id, type: 'income', excludeFromReports: true });
+  exp.excludeFromReports = true;   // Hauptkategorie markiert → gilt auch für Unterkategorie
+  s.transactions.push({ id: 'a', date: '2026-10-10', accountId: 'giro', amount: -359187, categoryId: 'aus', tags: [] });
+  s.transactions.push({ id: 'b', date: '2026-10-16', accountId: 'giro', amount: 359200, categoryId: 'rueck', tags: [] });
+  s.transactions.push({ id: 'c', date: '2026-10-20', accountId: 'giro', amount: 100000, categoryId: inc.id, tags: [] });
+  assert.ok(C.categoryExcluded(s, 'aus') && C.categoryExcluded(s, 'rueck') && !C.categoryExcluded(s, inc.id));
+  const r = C.categoryReport(s, { from: '2026-10-01', to: '2026-10-31' });
+  assert.equal(r.income['2026-10'], 100000);
+  assert.equal(r.expense['2026-10'], 0);
+  assert.equal(C.categorySpent(s, exp.id, '2026-10-01', '2026-10-31'), 0);
+  assert.equal(C.accountBalance(s, 'giro', '2026-12-31'), 100000 - 359187 + 359200 + 100000);
+});

@@ -683,7 +683,7 @@
     // Tags & Empfänger
     var tags = {}, payees = {};
     s.transactions.forEach(function (x) {
-      if (x.date < range[0] || x.date > range[1] || !C.isIncomeExpense(x)) return;
+      if (x.date < range[0] || x.date > range[1] || !C.isReportable(s, x)) return;
       if (accIds && accIds.indexOf(x.accountId) < 0) return;
       (x.tags || []).forEach(function (tg) { tags[tg] = (tags[tg] || 0) + x.amount; });
       if (x.amount < 0 && x.payee) { var k = x.payee.trim(); payees[k] = (payees[k] || 0) + x.amount; }
@@ -742,7 +742,7 @@
     }
     function dash(v) { return v ? v : '<span class="muted">–</span>'; }
     function usageBadges(x) {
-      var b = '';
+      var b = C.categoryExcluded(s, x.id) ? ' <span class="badge warn" title="zählt nicht in Auswertungen (durchlaufender Posten)">ohne Auswertung</span>' : '';
       if (x.recurring) b += ' <span class="badge" title="in ' + x.recurring + ' wiederkehrenden Buchung(en)">↻ ' + x.recurring + '</span>';
       if (x.rules) b += ' <span class="badge" title="in ' + x.rules + ' Regel(n) zur Auto-Kategorisierung">Regel</span>';
       if (x.loans) b += ' <span class="badge" title="Zinsen eines Kredits">Kredit</span>';
@@ -927,6 +927,7 @@
         '<label>Farbe</label><input type="color" name="color" value="' + esc(d.color || '#2f6fdb') + '">' +
         (d.type === 'expense' ? '<label>Budget / Monat (€)</label><input type="text" name="budget" class="amount" value="' + (d.budget ? esc(C.formatAmountInput(d.budget)) : '') + '" placeholder="optional">' +
           (!d.parentId ? '<span></span><div class="help">Leer lassen = Summe der Unterkategorie-Budgets.</div>' : '') : '') +
+        '<span></span><label class="chk" title="Buchungen bleiben im Kontostand, zählen aber nicht als Einnahme/Ausgabe"><input type="checkbox" name="excludeFromReports"' + (d.excludeFromReports ? ' checked' : '') + '> Nicht in Auswertung zählen (durchlaufender Posten, z. B. Auslagen für andere und deren Rückzahlung)</label>' +
         '</div>',
       onSubmit: function (form) {
         var name = form.elements.name.value.trim();
@@ -938,6 +939,7 @@
             parentId: form.elements.parentId.disabled ? d.parentId : (form.elements.parentId.value || null),
             color: form.elements.color.value, budget: isNaN(b) ? 0 : Math.abs(b || 0)
           });
+          if (form.elements.excludeFromReports.checked) rec.excludeFromReports = true; else delete rec.excludeFromReports;
           if (!form.elements.type.disabled) rec.type = form.elements.type.value;
           if (rec.parentId) { var p = C.findById(st.categories, rec.parentId); if (p) rec.type = p.type; }
           var i = st.categories.findIndex(function (x) { return x.id === rec.id; });

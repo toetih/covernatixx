@@ -892,6 +892,17 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     return true;
   }
 
+  /** Kategorie (oder ihre Hauptkategorie) ist als „nicht in Auswertung“ markiert – z. B. Auslagen für andere. */
+  function categoryExcluded(state, id) {
+    var c = id && findById(state.categories, id);
+    if (!c) return false;
+    if (c.excludeFromReports) return true;
+    var p = c.parentId && findById(state.categories, c.parentId);
+    return !!(p && p.excludeFromReports);
+  }
+  /** Zählt in Auswertungen: Einnahme/Ausgabe und Kategorie nicht ausgenommen. */
+  function isReportable(state, t) { return isIncomeExpense(t) && !categoryExcluded(state, t.categoryId); }
+
   function txType(t) {
     if (t.counterAccountId) return 'transfer';
     if (t.tradeId) return t.tradeType === 'dividend' ? 'income' : 'trade';
@@ -1136,7 +1147,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
    */
   function categoryUsage(state) {
     var u = {};
-    state.categories.forEach(function (c) { u[c.id] = { tx: 0, last: null, recurring: 0, rules: 0, loans: 0, budget: !!c.budget }; });
+    state.categories.forEach(function (c) { u[c.id] = { id: c.id, tx: 0, last: null, recurring: 0, rules: 0, loans: 0, budget: !!c.budget }; });
     state.transactions.forEach(function (t) {
       var x = u[t.categoryId];
       if (!x) return;
@@ -1237,7 +1248,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       if (cid === '__none') add(b.none, amount >= 0 ? 'income' : 'expense', m, amount);
     }
     state.transactions.forEach(function (t) {
-      if (!isIncomeExpense(t)) return;
+      if (!isReportable(state, t)) return;
       var m = reportMonth(t);
       if (m < fromM || m > toM) return;
       if (accSet && !accSet[t.accountId]) return;
@@ -1248,6 +1259,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
         var m = reportMonth(e);
         if (m < fromM || m > toM) return;
         if (accSet && !accSet[e.accountId]) return;
+        if (categoryExcluded(state, e.categoryId)) return;
         book(all, m, e.amount, e.categoryId);
         book(plan, m, e.amount, e.categoryId);
       });
@@ -1285,7 +1297,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     var sum = 0;
     var fromM = monthKey(from), toM = monthKey(to);
     state.transactions.forEach(function (t) {
-      if (!isIncomeExpense(t)) return;
+      if (!isReportable(state, t)) return;
       var m = reportMonth(t);
       if (m < fromM || m > toM) return;
       if (accSet && !accSet[t.accountId]) return;
@@ -2022,7 +2034,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     loanDebt: loanDebt, loanSchedule: loanSchedule, loanStats: loanStats, loanRule: loanRule, loanRate: loanRate, skipNext: skipNext,
     upcoming: upcoming, forecastBalances: forecastBalances,
     // Konten
-    findById: findById, effectOn: effectOn, isTransfer: isTransfer, isIncomeExpense: isIncomeExpense, txType: txType,
+    findById: findById, effectOn: effectOn, isTransfer: isTransfer, isIncomeExpense: isIncomeExpense, isReportable: isReportable, categoryExcluded: categoryExcluded, txType: txType,
     accountBalance: accountBalance, allBalances: allBalances, cashBalance: cashBalance, reconcileAccount: reconcileAccount, netWorth: netWorth, netWorthHistory: netWorthHistory,
     sortedAccounts: sortedAccounts, accountGroups: accountGroups, ACCOUNT_TYPES: ACCOUNT_TYPES,
     // Depots
@@ -3083,7 +3095,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
           '<td class="nowrap">' + C.formatDate(t.date) + '</td>' +
           (singleAcc ? '' : '<td class="nowrap">' + esc(isT ? accName(t.accountId) : accName(t.accountId)) + '</td>') +
           '<td>' + desc + tags + icons + '</td>' +
-          '<td>' + (isT ? '<span class="badge">Umbuchung</span>' : (t.tradeId && t.tradeType !== 'dividend' ? '<span class="badge">Wertpapier</span>' : (t.excludeFromReports ? (t.categoryId ? catLabel(t.categoryId) + ' <span class="badge" title="zählt nicht in Auswertungen">ohne Auswertung</span>' : '<span class="badge" title="zählt nicht in Auswertungen">' + esc(t.excludeLabel || 'Korrektur') + '</span>') : catLabel(t.categoryId)))) + '</td>' +
+          '<td>' + (isT ? '<span class="badge">Umbuchung</span>' : (t.tradeId && t.tradeType !== 'dividend' ? '<span class="badge">Wertpapier</span>' : (t.excludeFromReports || C.categoryExcluded(App.state, t.categoryId) ? (t.categoryId ? catLabel(t.categoryId) + ' <span class="badge" title="zählt nicht in Auswertungen">ohne Auswertung</span>' : '<span class="badge" title="zählt nicht in Auswertungen">' + esc(t.excludeLabel || 'Korrektur') + '</span>') : catLabel(t.categoryId)))) + '</td>' +
           '<td class="num bold">' + (amt == null ? '<span class="muted">' + esc(C.formatMoney(Math.abs(t.amount))) + '</span>' : money(amt, { color: true })) + '</td>' +
           (showBal ? '<td class="num">' + money(balMap[t.id]) + '</td>' : '') + '</tr>';
       });
@@ -4301,7 +4313,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     // Tags & Empfänger
     var tags = {}, payees = {};
     s.transactions.forEach(function (x) {
-      if (x.date < range[0] || x.date > range[1] || !C.isIncomeExpense(x)) return;
+      if (x.date < range[0] || x.date > range[1] || !C.isReportable(s, x)) return;
       if (accIds && accIds.indexOf(x.accountId) < 0) return;
       (x.tags || []).forEach(function (tg) { tags[tg] = (tags[tg] || 0) + x.amount; });
       if (x.amount < 0 && x.payee) { var k = x.payee.trim(); payees[k] = (payees[k] || 0) + x.amount; }
@@ -4360,7 +4372,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     }
     function dash(v) { return v ? v : '<span class="muted">–</span>'; }
     function usageBadges(x) {
-      var b = '';
+      var b = C.categoryExcluded(s, x.id) ? ' <span class="badge warn" title="zählt nicht in Auswertungen (durchlaufender Posten)">ohne Auswertung</span>' : '';
       if (x.recurring) b += ' <span class="badge" title="in ' + x.recurring + ' wiederkehrenden Buchung(en)">↻ ' + x.recurring + '</span>';
       if (x.rules) b += ' <span class="badge" title="in ' + x.rules + ' Regel(n) zur Auto-Kategorisierung">Regel</span>';
       if (x.loans) b += ' <span class="badge" title="Zinsen eines Kredits">Kredit</span>';
@@ -4545,6 +4557,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
         '<label>Farbe</label><input type="color" name="color" value="' + esc(d.color || '#2f6fdb') + '">' +
         (d.type === 'expense' ? '<label>Budget / Monat (€)</label><input type="text" name="budget" class="amount" value="' + (d.budget ? esc(C.formatAmountInput(d.budget)) : '') + '" placeholder="optional">' +
           (!d.parentId ? '<span></span><div class="help">Leer lassen = Summe der Unterkategorie-Budgets.</div>' : '') : '') +
+        '<span></span><label class="chk" title="Buchungen bleiben im Kontostand, zählen aber nicht als Einnahme/Ausgabe"><input type="checkbox" name="excludeFromReports"' + (d.excludeFromReports ? ' checked' : '') + '> Nicht in Auswertung zählen (durchlaufender Posten, z. B. Auslagen für andere und deren Rückzahlung)</label>' +
         '</div>',
       onSubmit: function (form) {
         var name = form.elements.name.value.trim();
@@ -4556,6 +4569,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
             parentId: form.elements.parentId.disabled ? d.parentId : (form.elements.parentId.value || null),
             color: form.elements.color.value, budget: isNaN(b) ? 0 : Math.abs(b || 0)
           });
+          if (form.elements.excludeFromReports.checked) rec.excludeFromReports = true; else delete rec.excludeFromReports;
           if (!form.elements.type.disabled) rec.type = form.elements.type.value;
           if (rec.parentId) { var p = C.findById(st.categories, rec.parentId); if (p) rec.type = p.type; }
           var i = st.categories.findIndex(function (x) { return x.id === rec.id; });

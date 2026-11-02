@@ -845,7 +845,7 @@
           '<td class="nowrap">' + C.formatDate(t.date) + '</td>' +
           (singleAcc ? '' : '<td class="nowrap">' + esc(isT ? accName(t.accountId) : accName(t.accountId)) + '</td>') +
           '<td>' + desc + tags + icons + '</td>' +
-          '<td>' + (isT ? '<span class="badge">Umbuchung</span>' : (t.tradeId && t.tradeType !== 'dividend' ? '<span class="badge">Wertpapier</span>' : (t.excludeFromReports ? (t.categoryId ? catLabel(t.categoryId) + ' <span class="badge" title="zählt nicht in Auswertungen">ohne Auswertung</span>' : '<span class="badge" title="zählt nicht in Auswertungen">' + esc(t.excludeLabel || 'Korrektur') + '</span>') : catLabel(t.categoryId)))) + '</td>' +
+          '<td>' + (isT ? '<span class="badge">Umbuchung</span>' : (t.tradeId && t.tradeType !== 'dividend' ? '<span class="badge">Wertpapier</span>' : (t.excludeFromReports || C.categoryExcluded(App.state, t.categoryId) ? (t.categoryId ? catLabel(t.categoryId) + ' <span class="badge" title="zählt nicht in Auswertungen">ohne Auswertung</span>' : '<span class="badge" title="zählt nicht in Auswertungen">' + esc(t.excludeLabel || 'Korrektur') + '</span>') : catLabel(t.categoryId)))) + '</td>' +
           '<td class="num bold">' + (amt == null ? '<span class="muted">' + esc(C.formatMoney(Math.abs(t.amount))) + '</span>' : money(amt, { color: true })) + '</td>' +
           (showBal ? '<td class="num">' + money(balMap[t.id]) + '</td>' : '') + '</tr>';
       });

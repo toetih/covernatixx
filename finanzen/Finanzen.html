@@ -333,6 +333,21 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
 .split-legend b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .split-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
 
+/* Übersicht: aufklappbare Zeilen */
+.bar-row.ov { grid-template-columns: 22px 190px 1fr 110px; }
+.ov-toggle { width: 20px; height: 20px; border: 1px solid var(--border-strong, var(--border)); background: var(--surface); color: var(--text); border-radius: 5px; font-size: 13px; line-height: 16px; padding: 0; cursor: pointer; }
+.ov-toggle:hover { background: var(--surface-2); }
+.ov-detail { margin: -2px 0 8px 32px; padding: 8px 10px; border-left: 2px solid var(--border); background: var(--surface-2); border-radius: 0 6px 6px 0; }
+.ov-hist { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; margin-bottom: 6px; }
+.ov-items { width: 100%; table-layout: fixed; }
+.ov-items td { padding: 3px 6px; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-items td:first-child { width: 86px; }
+.ov-items td.num { width: 92px; }
+.ov-items td.fixcol { width: 40px; }
+.kpi.click { cursor: pointer; }
+.kpi.click:hover { border-color: var(--accent, var(--series-1)); }
+.bar-avg { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--muted); opacity: .7; }
+
 </style>
 </head>
 <body>
@@ -1195,7 +1210,33 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
   }
 
   /** Fixkosten: aus Dauerauftrag/Vertrag, Kreditrate oder als fix markiert. */
-  function isFixedCost(t) { return !!(t.recurringId || t.ruleId || t.loanPart || t.fixed); }
+  function isFixedCost(t, state) {
+    var rid = t.recurringId || t.ruleId;
+    if (rid && state) { var r = findById(state.recurring, rid); if (r && r.variable) return false; }   // z. B. Haushaltsgeld per Dauerauftrag
+    return !!(rid || t.loanPart || t.fixed);
+  }
+
+  /**
+   * Fixkosten pro Monat aus den aktiven Daueraufträgen und Kreditraten – Jahres-/Quartalsbeiträge auf 12 Monate verteilt.
+   * Ohne Geschäftskonten, als variabel markierte Daueraufträge und Kategorien „nicht in Auswertung“.
+   */
+  function fixedCostsMonthly(state, today) {
+    var items = [], total = 0;
+    state.recurring.forEach(function (r) {
+      if (!r.active || (r.endDate && r.endDate < today) || r.variable) return;
+      var kind = ruleKind(r);
+      if (kind !== 'expense' && kind !== 'loan') return;
+      if (isBusinessAccount(findById(state.accounts, r.accountId))) return;
+      if (kind === 'expense' && categoryExcluded(state, r.categoryId)) return;
+      if (kind === 'loan' && loanDebt(state, r.loanAccountId, today) <= 0) return;
+      var m = -monthlyEquivalent(r);
+      if (m <= 0) return;
+      items.push({ rule: r, monthly: m, kind: kind });
+      total += m;
+    });
+    items.sort(function (a, b) { return b.monthly - a.monthly; });
+    return { total: total, items: items };
+  }
   /** Geschäftskonto (Gruppe „Business“/„Geschäft“/„Firma“): Überweisungen von dort aufs Privatkonto sind Entnahmen. */
   function isBusinessAccount(a) { return !!a && /business|gesch(ä|ae)ft|firma|selbstst/i.test(a.group || ''); }
 
@@ -1209,7 +1250,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     var priv = opts.privateOnly !== false;
     var bizAcc = {};
     state.accounts.forEach(function (a) { if (isBusinessAccount(a)) bizAcc[a.id] = true; });
-    var srcs = {}, exp = { fixed: 0, variable: 0, plannedFixed: 0 }, byMain = {};
+    var srcs = {}, exp = { fixed: 0, variable: 0, plannedFixed: 0, plannedVariable: 0 }, byMain = {};
     var cat = function (id) { return id ? findById(state.categories, id) : null; };
     var usedSubs = {};
     function noteSub(catId) { var c = cat(catId); if (c && c.parentId) (usedSubs[c.parentId] = usedSubs[c.parentId] || {})[c.id] = true; }
@@ -1221,17 +1262,25 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       if (!c) return { key: '__none', label: 'Ohne Kategorie', main: null };
       var m = c.parentId ? cat(c.parentId) : c;
       var multi = m && usedSubs[m.id] && Object.keys(usedSubs[m.id]).length > 1;
-      return multi && c.parentId ? { key: c.id, label: c.name, main: m } : { key: m.id, label: m.name, main: m };
+      // Schlüssel immer die Unterkategorie (stabil über Monate), Name der Hauptkategorie, wenn sie diesen Monat nur eine hat
+      return { key: c.id, label: multi && c.parentId ? c.name : m.name, main: m };
     }
-    function addSrc(k, v, isPlanned) {
-      var o = srcs[k.key] || (srcs[k.key] = { key: k.key, label: k.label, color: k.main ? k.main.color : null, actual: 0, planned: 0, transfer: !!k.transfer });
+    function item(t, v, isPlanned, fixed) {
+      return { id: t.id || null, date: t.date, payee: t.payee || (t.ruleId ? (findById(state.recurring, t.ruleId) || {}).name : '') || '', amount: v, categoryId: t.categoryId || null, planned: !!isPlanned, fixed: !!fixed };
+    }
+    function addSrc(k, v, isPlanned, t) {
+      var o = srcs[k.key] || (srcs[k.key] = { key: k.key, mainId: k.main ? k.main.id : k.key, mainLabel: k.main ? k.main.name : k.label, label: k.label, color: k.main ? k.main.color : null, actual: 0, planned: 0, transfer: !!k.transfer, items: [] });
       if (isPlanned) o.planned += v; else o.actual += v;
+      if (t) o.items.push(item(t, v, isPlanned));
     }
+    function newMain() { return { fixed: 0, variable: 0, plannedFixed: 0, plannedVariable: 0, items: [] }; }
     function addExp(t, v, isPlanned) {
       var c = cat(t.categoryId), mid = c ? (c.parentId || c.id) : '__none';
-      var o = byMain[mid] || (byMain[mid] = { fixed: 0, variable: 0, plannedFixed: 0 });
-      if (isPlanned) { exp.plannedFixed += -v; o.plannedFixed += -v; }
-      else if (isFixedCost(t)) { exp.fixed += -v; o.fixed += -v; } else { exp.variable += -v; o.variable += -v; }
+      var o = byMain[mid] || (byMain[mid] = newMain());
+      var fixed = isFixedCost(t, state);
+      if (isPlanned) { if (fixed) { exp.plannedFixed += -v; o.plannedFixed += -v; } else { exp.plannedVariable += -v; o.plannedVariable += -v; } }
+      else if (fixed) { exp.fixed += -v; o.fixed += -v; } else { exp.variable += -v; o.variable += -v; }
+      o.items.push(item(t, -v, isPlanned, fixed));
     }
     state.transactions.forEach(function (t) {
       if (reportMonth(t) !== mk) return;
@@ -1240,25 +1289,26 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
         if (priv && t.loanPart === 'interest') return;   // steckt in der Kreditrate (unten)
         var tc = cat(t.categoryId);
         // Gutschrift in einer Ausgaben-Kategorie (Erstattung, Retoure) mindert die Ausgaben statt Einnahme zu sein
-        if (t.amount > 0 && !(tc && tc.type === 'expense')) addSrc(incKey(t.categoryId), t.amount); else addExp(t, t.amount);
+        if (t.amount > 0 && !(tc && tc.type === 'expense')) addSrc(incKey(t.categoryId), t.amount, false, t); else addExp(t, t.amount);
       } else if (t.counterAccountId && !t.tradeId) {
         var from = findById(state.accounts, t.amount < 0 ? t.accountId : t.counterAccountId), to = findById(state.accounts, t.amount < 0 ? t.counterAccountId : t.accountId);
         if (priv && from && to && to.type === 'darlehen' && !bizAcc[from.id] && from.type !== 'darlehen') {
           // Kreditrate (Zins + Tilgung) zählt im Haushalt als Fixkosten
-          var lo = byMain.__loans || (byMain.__loans = { fixed: 0, variable: 0, plannedFixed: 0 });
+          var lo = byMain.__loans || (byMain.__loans = newMain());
           lo.fixed += Math.abs(t.amount); exp.fixed += Math.abs(t.amount); exp.loans = (exp.loans || 0) + Math.abs(t.amount);
+          lo.items.push({ id: t.id, date: t.date, payee: to.name, amount: Math.abs(t.amount), planned: false, fixed: true });
           return;
         }
         if (!priv || !from || !to || [from.type, to.type].some(function (x) { return x === 'darlehen' || x === 'kreditkarte' || x === 'depot'; })) return;
-        if (bizAcc[from.id] && !bizAcc[to.id]) addSrc({ key: 'biz:' + from.id, label: 'Entnahme ' + from.name, main: null, transfer: true }, Math.abs(t.amount));
-        else if (!bizAcc[from.id] && bizAcc[to.id] && to.type !== 'kreditkarte') addSrc({ key: 'biz:' + to.id, label: 'Entnahme ' + to.name, main: null, transfer: true }, -Math.abs(t.amount));
+        if (bizAcc[from.id] && !bizAcc[to.id]) addSrc({ key: 'biz:' + from.id, label: 'Entnahme ' + from.name, main: null, transfer: true }, Math.abs(t.amount), false, { id: t.id, date: t.date, payee: from.name + ' → ' + to.name });
+        else if (!bizAcc[from.id] && bizAcc[to.id] && to.type !== 'kreditkarte') addSrc({ key: 'biz:' + to.id, label: 'Entnahme ' + to.name, main: null, transfer: true }, -Math.abs(t.amount), false, { id: t.id, date: t.date, payee: from.name + ' → ' + to.name + ' (Einlage)' });
       }
     });
     var loanAcc = {};
     state.accounts.forEach(function (a) { if (a.type === 'darlehen') loanAcc[a.id] = true; });
     planned.forEach(function (e) {
       if (priv && loanAcc[e.accountId]) return;   // Zinsanteil – im Haushalt zählt die ganze Rate
-      if (e.amount > 0) addSrc(incKey(e.categoryId), e.amount, true); else addExp(e, e.amount, true);
+      if (e.amount > 0) addSrc(incKey(e.categoryId), e.amount, true, e); else addExp(e, e.amount, true);
     });
     if (priv && today) {
       state.recurring.forEach(function (r) {
@@ -1266,8 +1316,9 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
         if (loanDebt(state, r.loanAccountId, today) <= 0) return;
         occurrences(r, endOfMonth(mk + '-01'), 50).forEach(function (d) {
           if (d <= today || monthKey(d) !== mk) return;
-          var v = Math.abs(r.amount), lo = byMain.__loans || (byMain.__loans = { fixed: 0, variable: 0, plannedFixed: 0 });
+          var v = Math.abs(r.amount), lo = byMain.__loans || (byMain.__loans = newMain());
           lo.plannedFixed += v; exp.plannedFixed += v; exp.loansPlanned = (exp.loansPlanned || 0) + v;
+          lo.items.push({ id: null, date: d, payee: r.name || 'Kreditrate', amount: v, planned: true, fixed: true });
         });
       });
     }
@@ -2140,7 +2191,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     loanDebt: loanDebt, loanSchedule: loanSchedule, loanStats: loanStats, loanRule: loanRule, loanRate: loanRate, skipNext: skipNext,
     upcoming: upcoming, forecastBalances: forecastBalances,
     // Konten
-    findById: findById, effectOn: effectOn, isTransfer: isTransfer, isIncomeExpense: isIncomeExpense, isFixedCost: isFixedCost, monthBreakdown: monthBreakdown, isBusinessAccount: isBusinessAccount, isReportable: isReportable, categoryExcluded: categoryExcluded, txType: txType,
+    findById: findById, effectOn: effectOn, isTransfer: isTransfer, isIncomeExpense: isIncomeExpense, isFixedCost: isFixedCost, fixedCostsMonthly: fixedCostsMonthly, monthBreakdown: monthBreakdown, isBusinessAccount: isBusinessAccount, isReportable: isReportable, categoryExcluded: categoryExcluded, txType: txType,
     accountBalance: accountBalance, allBalances: allBalances, cashBalance: cashBalance, reconcileAccount: reconcileAccount, netWorth: netWorth, netWorthHistory: netWorthHistory,
     sortedAccounts: sortedAccounts, accountGroups: accountGroups, ACCOUNT_TYPES: ACCOUNT_TYPES,
     // Depots
@@ -2788,6 +2839,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     var mk = C.monthKey(t);
     var inc = rep.income[mk] || 0, exp = rep.expense[mk] || 0;
     var fc = C.forecastBalances(s, t, me);
+    var fcm = C.fixedCostsMonthly(s, t);
     var fcLiquid = 0;
     s.accounts.forEach(function (a) { if (!a.excludeFromNetWorth && App.isCashAccount(a)) fcLiquid += fc[a.id]; });
 
@@ -2800,6 +2852,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       kpi('Depots', money(depotHoldValue), depotCost ? 'G/V ' + C.formatMoney(depotHoldValue - depotCost, { sign: true }) + ' (' + C.formatPercent((depotHoldValue - depotCost) / depotCost) + ')' : '&nbsp;') +
       kpi('Einnahmen ' + C.formatMonth(mk), money(inc), '&nbsp;') +
       kpi('Ausgaben ' + C.formatMonth(mk), money(exp), 'Saldo ' + C.formatMoney(inc + exp, { sign: true })) +
+      '<div class="kpi click" data-act="fixed-list" title="Liste anzeigen"><div class="l">Fixkosten / Monat</div><div class="v">' + esc(C.formatMoney(fcm.total)) + '</div><div class="s">Jahresbeiträge verteilt · ' + fcm.items.length + ' Posten ›</div></div>' +
       '</div>';
 
     // Offene Buchungen ohne Kategorie
@@ -2845,8 +2898,16 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
 
     // Monat im Überblick: Einnahmen nach Quelle, Ausgaben fix/variabel, Kategorien
     var mb = C.monthBreakdown(s, mk, t);
+    mb.hist = [];
+    for (var hi = 6; hi >= 1; hi--) { var hm = C.monthKey(C.addMonths(mk + '-01', -hi)); mb.hist.push({ m: hm, b: C.monthBreakdown(s, hm, null) }); }
+    // Rest des Monats: variable Ausgaben wie im Schnitt der letzten 6 Monate erwartet (Lebensmittel, Tanken …)
+    // Median statt Mittelwert: ein Urlaubsmonat soll die Erwartung nicht verzerren
+    var vars = mb.hist.map(function (h) { return h.b.expense.variable; }).sort(function (a, b) { return a - b; });
+    var avgVar = Math.round((vars[2] + vars[3]) / 2);
+    mb.expectedVariable = Math.max(0, avgVar - mb.expense.variable);
+    mb.avgVariable = avgVar;
     html += '<div class="card"><div class="card-head"><h2>Einnahmen &amp; Ausgaben ' + esc(C.formatMonth(mk, true)) + '</h2><a class="btn small" href="#auswertung">Auswertung</a></div><div class="card-body">' +
-      monthSplitBars(mb) + '<hr class="sep">' + expenseBars(rep, mk, mb) + '</div></div>';
+      monthSplitBars(mb) + '<hr class="sep"><div class="bold mb">Einnahmen</div>' + incomeList(mb, mk) + '<hr class="sep"><div class="bold mb">Ausgaben</div>' + expenseBars(rep, mk, mb) + '</div></div>';
     html += '</div>';
 
     html += '<div class="grid two" style="margin-top:16px">';
@@ -2874,6 +2935,11 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     if (impIn) impIn.onchange = function () { if (impIn.files.length) App.importFiles(impIn.files); impIn.value = ''; };
     el.onclick = function (e) {
       if (e.target.closest('label.btn')) return;
+      var tg = e.target.closest('[data-ov]');
+      if (tg) { App.ui.ovOpen[tg.dataset.ov] = !App.ui.ovOpen[tg.dataset.ov]; App.render(); return; }
+      var tr = e.target.closest('tr[data-tx]');
+      if (tr) { var tx = C.findById(App.state.transactions, tr.dataset.tx); if (tx) App.editTransaction(tx); return; }
+      if (e.target.closest('[data-act="fixed-list"]')) { fixedCostList(); return; }
       var a = e.target.closest('[data-act],[data-acc],[data-rule]');
       if (!a) return;
       var act = a.dataset.act;
@@ -2891,6 +2957,19 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       if (a.dataset.rule) return App.editRule(C.findById(s.recurring, a.dataset.rule));
     };
   };
+
+  /** Liste der Fixkosten pro Monat (aus Daueraufträgen und Kreditraten). */
+  function fixedCostList() {
+    var s = App.state, f = C.fixedCostsMonthly(s, today());
+    var rhythm = function (r) { var n = r.interval || 1; if (r.unit === 'year') return n === 1 ? 'jährlich' : 'alle ' + n + ' Jahre'; if (r.unit === 'week') return n === 1 ? 'wöchentlich' : 'alle ' + n + ' Wochen'; return n === 1 ? 'monatlich' : n === 3 ? 'vierteljährlich' : n === 6 ? 'halbjährlich' : 'alle ' + n + ' Monate'; };
+    var body = '<p class="help">Aktive Daueraufträge und Kreditraten (ohne Geschäftskonten und als „variabel“ markierte), Jahres- und Quartalsbeiträge auf 12 Monate verteilt. Klick öffnet den Dauerauftrag.</p>' +
+      '<div class="tbl-wrap" style="max-height:60vh"><table class="tbl"><thead><tr><th>Posten</th><th>Rhythmus</th><th class="num">Betrag</th><th class="num">pro Monat</th></tr></thead><tbody>' +
+      f.items.map(function (x) {
+        return '<tr class="click" data-rule="' + x.rule.id + '"><td>' + esc(x.rule.name || x.rule.payee || '') + '<div class="small">' + esc(x.kind === 'loan' ? 'Kreditrate' : (C.categoryPath(s, x.rule.categoryId) || '')) + '</div></td><td class="small">' + esc(rhythm(x.rule)) + '</td><td class="num">' + esc(C.formatMoney(Math.abs(x.rule.amount))) + '</td><td class="num bold">' + esc(C.formatMoney(x.monthly)) + '</td></tr>';
+      }).join('') + '<tr class="sum-row"><td colspan="3">Summe pro Monat</td><td class="num">' + esc(C.formatMoney(f.total)) + '</td></tr></tbody></table></div>';
+    var form = App.modal({ title: 'Fixkosten pro Monat', body: body, wide: true, submitLabel: 'Schließen', onSubmit: function () {} });
+    form.addEventListener('click', function (e) { var r = e.target.closest('[data-rule]'); if (!r) return; var rule = C.findById(App.state.recurring, r.dataset.rule); if (rule) { App.closeModal(); App.editRule(rule); } });
+  }
 
   function kpi(l, v, s) { return '<div class="kpi"><div class="l">' + esc(l) + '</div><div class="v">' + v + '</div><div class="s">' + s + '</div></div>'; }
 
@@ -2913,7 +2992,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       segs.push(r);
     }
     var inc = 0; segs.forEach(function (x) { inc += x.actual + x.planned; });
-    var e = mb.expense, out = e.fixed + e.variable + e.plannedFixed;
+    var e = mb.expense, ev = mb.expectedVariable || 0, out = e.fixed + e.variable + e.plannedFixed + (e.plannedVariable || 0) + ev;
     var max = Math.max(inc, out) || 1;
     function bar(parts) {
       return '<div class="split-track">' + parts.map(function (p) {
@@ -2933,29 +3012,101 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     var expParts = [
       { v: e.fixed, color: 'var(--series-2)', title: 'Fixkosten gebucht: ' + C.formatMoney(e.fixed) },
       { v: e.plannedFixed, color: 'var(--series-2)', planned: true, title: 'Fixkosten noch geplant: ' + C.formatMoney(e.plannedFixed) },
-      { v: e.variable, color: 'var(--series-1)', title: 'Variable Ausgaben: ' + C.formatMoney(e.variable) }
+      { v: e.variable, color: 'var(--series-1)', title: 'Variable Ausgaben: ' + C.formatMoney(e.variable) },
+      { v: (e.plannedVariable || 0) + ev, color: 'var(--series-1)', planned: true, title: 'Variabel erwartet bis Monatsende: ' + C.formatMoney((e.plannedVariable || 0) + ev) + ' (typischer Monat der letzten 6: ' + C.formatMoney(mb.avgVariable || 0) + ')' }
     ];
     var saldo = inc - out;
     return '<div class="split-row"><div class="split-head"><span class="bold">Einnahmen</span><span class="bold">' + esc(C.formatMoney(inc)) + '</span></div>' + bar(incParts) +
       legend(segs.map(function (x) { return { label: x.label + (x.planned && !x.actual ? ' (geplant)' : ''), v: x.actual + x.planned, color: x.color, planned: x.planned && !x.actual, title: x.title || (x.transfer ? 'Umbuchung vom Geschäftskonto aufs Privatkonto' : '') }; })) + '</div>' +
       '<div class="split-row"><div class="split-head"><span class="bold">Ausgaben</span><span class="bold">' + esc(C.formatMoney(out)) + '</span></div>' + bar(expParts) +
       legend([{ label: 'Fixkosten', v: e.fixed + e.plannedFixed, color: 'var(--series-2)', title: 'Daueraufträge, Verträge, Kreditraten' + ((e.loans || e.loansPlanned) ? ' (davon Kredite ' + C.formatMoney((e.loans || 0) + (e.loansPlanned || 0)) + ')' : '') + (e.plannedFixed ? ' – ' + C.formatMoney(e.plannedFixed) + ' noch geplant' : '') },
-        { label: 'Variabel', v: e.variable, color: 'var(--series-1)', title: 'alles ohne Dauerauftrag' }]) + '</div>' +
-      '<div class="help">Saldo ' + '<b class="' + (saldo < 0 ? 'neg' : 'pos') + '">' + esc(C.formatMoney(saldo, { sign: true })) + '</b>' + (incPlanned || e.plannedFixed ? ' inkl. noch geplanter Daueraufträge (schraffiert)' : '') +
+        { label: 'Variabel', v: e.variable, color: 'var(--series-1)', title: 'alles ohne Dauerauftrag' },
+        { label: 'variabel erwartet', v: (e.plannedVariable || 0) + ev, color: 'var(--series-1)', planned: true, title: 'Rest bis zu einem typischen Monat (Median der letzten 6: ' + C.formatMoney(mb.avgVariable || 0) + '): Lebensmittel, Tanken, Einkäufe …' }]) + '</div>' +
+      '<div class="help">Saldo ' + '<b class="' + (saldo < 0 ? 'neg' : 'pos') + '">' + esc(C.formatMoney(saldo, { sign: true })) + '</b>' + (incPlanned || e.plannedFixed ? ' inkl. noch geplanter Daueraufträge' : '') + (ev ? ' und erwarteter variabler Ausgaben' : '') + ((incPlanned || e.plannedFixed || ev) ? ' (schraffiert)' : '') +
       ' · Haushaltssicht: ohne Geschäftskonten (Entnahmen von dort zählen als Einnahme), Kreditraten komplett als Fixkosten, Gehalt vom Monatsende zählt zum Folgemonat.</div>';
+  }
+
+  App.ui.ovOpen = App.ui.ovOpen || {};
+  /** Aufklapp-Details: Buchungen (gebucht/geplant) einer Quelle oder Kategorie. */
+  function itemsTable(items, showCat) {
+    if (!items || !items.length) return '<div class="small muted">Keine Buchungen.</div>';
+    var list = items.slice().sort(function (a, b) { return (b.amount - a.amount); });
+    var more = list.length > 15 ? list.length - 15 : 0;
+    return '<table class="tbl ov-items"><tbody>' + list.slice(0, 15).map(function (x) {
+      return '<tr class="' + (x.planned ? 'muted' : '') + (x.id ? ' click" data-tx="' + x.id : '') + '"><td class="nowrap small">' + C.formatDate(x.date) + '</td><td class="ellipsis">' + esc(x.payee || '–') +
+        (showCat && x.categoryId ? ' <span class="small muted">' + esc(C.categoryPath(App.state, x.categoryId)) + '</span>' : '') +
+        (x.planned ? ' <span class="badge">geplant</span>' : '') + (x.fixed === false && showCat !== 'inc' ? '' : '') + '</td>' +
+        (showCat === 'exp' ? '<td class="small fixcol">' + (x.fixed ? '<span class="badge" style="color:var(--series-2)">fix</span>' : '') + '</td>' : '') +
+        '<td class="num nowrap">' + esc(C.formatMoney(x.amount)) + '</td></tr>';
+    }).join('') + (more ? '<tr class="muted"><td colspan="4" class="small">… und ' + more + ' weitere</td></tr>' : '') + '</tbody></table>';
+  }
+  function toggleBtn(key) { return '<button class="ov-toggle" data-ov="' + esc(key) + '" title="Details">' + (App.ui.ovOpen[key] ? '−' : '+') + '</button>'; }
+
+  /** Einnahmen nach Quelle mit Ø der letzten 6 Monate und Aufklapp-Details. */
+  function incomeList(mb, mk) {
+    var s = App.state;
+    if (!mb.sources.length) return '<div class="empty">Keine Einnahmen in diesem Monat.</div>';
+    var hist = mb.hist;
+    // Hauptkategorie mit mehreren Unterkategorien im Zeitraum (z. B. Gehalt: Grundgehalt/Sonderzahlung) → je Unterkategorie, sonst je Hauptkategorie
+    var subsOfMain = {};
+    [mb].concat(hist.map(function (h) { return h.b; })).forEach(function (b) { b.sources.forEach(function (y) { (subsOfMain[y.mainId] = subsOfMain[y.mainId] || {})[y.key] = true; }); });
+    var rowKey = function (y) { return Object.keys(subsOfMain[y.mainId] || {}).length > 1 ? y.key : y.mainId; };
+    var rowLabel = function (y) { return Object.keys(subsOfMain[y.mainId] || {}).length > 1 && !y.transfer ? (C.findById(s.categories, y.key) || {}).name || y.label : y.mainLabel; };
+    function group(b) {
+      var out = {};
+      b.sources.forEach(function (y) {
+        var k = rowKey(y), o = out[k] || (out[k] = { key: k, label: rowLabel(y), color: y.color, actual: 0, planned: 0, transfer: y.transfer, items: [] });
+        o.actual += y.actual; o.planned += y.planned; o.items = o.items.concat(y.items || []);
+      });
+      return out;
+    }
+    var cur = group(mb), histG = hist.map(function (h) { return { m: h.m, g: group(h.b) }; });
+    function histOf(key) { return histG.map(function (h) { return { m: h.m, v: h.g[key] ? h.g[key].actual : 0 }; }); }
+    // Quellen der letzten Monate auch zeigen, wenn diesen Monat (noch) nichts kam – z. B. Entnahmen, Praxis (ab Ø 100 €)
+    var srcList = Object.keys(cur).map(function (k) { return cur[k]; });
+    histG.forEach(function (h) { Object.keys(h.g).forEach(function (k) {
+      if (cur[k] || srcList.some(function (z) { return z.key === k; })) return;
+      var avg = 0; histOf(k).forEach(function (x) { avg += x.v; });
+      if (avg / 6 >= 10000) srcList.push({ key: k, label: h.g[k].label, color: h.g[k].color, actual: 0, planned: 0, transfer: h.g[k].transfer, items: [] });
+    }); });
+    srcList.sort(function (a, b) { return (b.actual + b.planned) - (a.actual + a.planned); });
+    var max = Math.max.apply(null, srcList.map(function (x) { return x.actual + x.planned; })) || 1;
+    return '<div class="bars">' + srcList.map(function (x, i) {
+      var key = 'inc:' + x.key, open = App.ui.ovOpen[key], hs = histOf(x.key), avg = 0;
+      hs.forEach(function (h) { avg += h.v; }); avg = Math.round(avg / hs.length);
+      var col = x.color || 'var(--series-1)';
+      var row = '<div class="bar-row ov">' + toggleBtn(key) + '<span class="name" title="' + esc(x.label) + '"><span class="cat-dot" style="background:' + esc(col) + '"></span>' + esc(x.label) + '</span>' +
+        '<span class="bar-track"><span class="bar-fill" style="position:absolute;left:0;top:0;width:' + (x.actual / max * 100).toFixed(1) + '%;background:' + esc(col) + '"></span>' +
+        (x.planned ? '<span class="bar-fill split-seg planned" style="position:absolute;top:0;left:' + (x.actual / max * 100).toFixed(1) + '%;width:' + (x.planned / max * 100).toFixed(1) + '%;background:' + esc(col) + '"></span>' : '') + '</span>' +
+        '<span class="val">' + esc(C.formatMoney(x.actual + x.planned)) + '<div class="small muted" title="Durchschnitt der letzten 6 Monate">Ø ' + esc(C.formatMoney(avg)) + '</div></span></div>';
+      if (open) {
+        row += '<div class="ov-detail"><div class="ov-hist">' + hs.map(function (h) { return '<span><span class="muted">' + esc(C.formatMonth(h.m)) + '</span> <b>' + esc(C.formatMoney(h.v)) + '</b></span>'; }).join('') + '</div>' +
+          itemsTable(x.items, x.transfer ? null : 'inc') + '</div>';
+      }
+      void i;
+      return row;
+    }).join('') + '</div><div class="help mt">Ø = Durchschnitt der letzten 6 Monate · „+“ zeigt Verlauf und Buchungen.</div>';
   }
 
   function expenseBars(rep, mk, mb) {
     var s = App.state;
     var rows = [];
+    var avgMain = {};
+    if (mb && mb.hist) mb.hist.forEach(function (h) { Object.keys(h.b.byMain).forEach(function (k) { var o = h.b.byMain[k]; avgMain[k] = (avgMain[k] || 0) + (o.fixed + o.variable) / mb.hist.length; }); });
     if (mb) {
       // Haushaltssicht (wie die Balken oben): gebucht + noch geplante Fixkosten, Kreditraten als eigene Zeile
       Object.keys(mb.byMain).forEach(function (mid) {
         var o = mb.byMain[mid], c = mid === '__loans' ? null : cat(mid);
-        var fixed = Math.max(o.fixed + o.plannedFixed, 0), v = fixed + o.variable;
-        if (v <= 0 && !(c && budgetFor(c))) return;
+        var fixed = Math.max(o.fixed + o.plannedFixed, 0), v = fixed + o.variable + (o.plannedVariable || 0);
+        if (v <= 0 && !(c && budgetFor(c)) && !(avgMain[mid] >= 5000)) return;
         rows.push({ id: mid, name: mid === '__loans' ? 'Kreditraten' : (c ? c.name : 'Ohne Kategorie'), color: mid === '__loans' ? 'var(--series-2)' : (c ? c.color : '#999'),
-          v: Math.max(v, 0), fixed: Math.min(fixed, Math.max(v, 0)), planned: o.plannedFixed, budget: c ? budgetFor(c) : 0 });
+          v: Math.max(v, 0), fixed: Math.min(fixed, Math.max(v, 0)), planned: o.plannedFixed + (o.plannedVariable || 0), budget: c ? budgetFor(c) : 0, items: o.items, avg: Math.round(avgMain[mid] || 0) });
+      });
+      // Kategorien, die üblicherweise Ausgaben haben, diesen Monat aber noch nicht (z. B. Lebensmittel am Monatsanfang)
+      Object.keys(avgMain).forEach(function (mid) {
+        if (mb.byMain[mid] || avgMain[mid] < 5000) return;
+        var c = mid === '__loans' ? null : cat(mid);
+        rows.push({ id: mid, name: mid === '__loans' ? 'Kreditraten' : (c ? c.name : 'Ohne Kategorie'), color: c ? c.color : '#999', v: 0, fixed: 0, budget: c ? budgetFor(c) : 0, items: [], avg: Math.round(avgMain[mid]) });
       });
     } else {
       Object.keys(rep.byMain).forEach(function (mid) {
@@ -2973,18 +3124,32 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       }
     });
     if (!rows.length) return '<div class="empty">Diesen Monat noch keine Ausgaben.</div>';
-    rows.sort(function (a, b) { return b.v - a.v; });
-    var max = Math.max.apply(null, rows.map(function (r) { return Math.max(r.v, r.budget); })) || 1;
+    rows.sort(function (a, b) { return (b.v - a.v) || ((b.avg || 0) - (a.avg || 0)); });
+    var max = Math.max.apply(null, rows.map(function (r) { return Math.max(r.v, r.budget, r.avg || 0); })) || 1;
     return '<div class="bars">' + rows.slice(0, 12).map(function (r) {
       var over = r.budget && r.v > r.budget;
       var title = C.formatMoney(r.v) + (r.fixed ? ' (davon fix ' + C.formatMoney(r.fixed) + (r.planned ? ', ' + C.formatMoney(r.planned) + ' noch geplant' : '') + ')' : '') + (r.budget ? ' von ' + C.formatMoney(r.budget) + ' Budget' : '');
-      return '<div class="bar-row" title="' + esc(title) + '"><span class="name"><span class="cat-dot" style="background:' + esc(r.color) + '"></span>' + esc(r.name) + '</span>' +
+      var okey = 'exp:' + r.id;
+      return '<div class="bar-row' + (mb ? ' ov' : '') + '" title="' + esc(title) + '">' + (mb ? toggleBtn(okey) : '') + '<span class="name"><span class="cat-dot" style="background:' + esc(r.color) + '"></span>' + esc(r.name) + '</span>' +
         '<span class="bar-track">' + (r.fixed && !over ? '<span class="bar-fill" style="position:absolute;left:0;top:0;width:' + (r.fixed / max * 100).toFixed(1) + '%;background:var(--series-2)" title="fix ' + esc(C.formatMoney(r.fixed)) + '"></span>' +
           '<span class="bar-fill" style="position:absolute;top:0;left:' + (r.fixed / max * 100).toFixed(1) + '%;width:' + ((r.v - r.fixed) / max * 100).toFixed(1) + '%;background:var(--series-1)"></span>'
           : '<span class="bar-fill" style="display:block;width:' + (r.v / max * 100).toFixed(1) + '%;background:' + (over ? 'var(--neg)' : 'var(--series-1)') + '"></span>') +
-        (r.budget ? '<span class="bar-budget" style="left:' + (r.budget / max * 100).toFixed(1) + '%"></span>' : '') + '</span>' +
-        '<span class="val">' + esc(C.formatMoney(r.v)) + (r.budget ? '<div class="small ' + (over ? 'neg' : 'muted') + '">' + (over ? 'über ' : 'von ') + esc(C.formatMoney(over ? r.v - r.budget : r.budget)) + '</div>' : '') + '</span></div>';
+        (r.budget ? '<span class="bar-budget" style="left:' + (r.budget / max * 100).toFixed(1) + '%"></span>' : '') +
+        (r.avg ? '<span class="bar-avg" style="left:' + (r.avg / max * 100).toFixed(1) + '%" title="Ø 6 Monate ' + esc(C.formatMoney(r.avg)) + '"></span>' : '') + '</span>' +
+        '<span class="val">' + esc(C.formatMoney(r.v)) + (r.budget ? '<div class="small ' + (over ? 'neg' : 'muted') + '">' + (over ? 'über ' : 'von ') + esc(C.formatMoney(over ? r.v - r.budget : r.budget)) + '</div>' : '') + (r.avg ? '<div class="small muted">Ø ' + esc(C.formatMoney(r.avg)) + '</div>' : '') + '</span></div>' +
+        (mb && App.ui.ovOpen[okey] ? '<div class="ov-detail">' + subSummary(r) + itemsTable(r.items, 'exp') + '</div>' : '');
     }).join('') + '</div>' + (rows.length > 12 ? '<div class="help">… und ' + (rows.length - 12) + ' weitere Kategorien</div>' : '') + '<div class="help mt"><span class="cat-dot" style="background:var(--series-2)"></span>fix (inkl. noch geplanter Daueraufträge) <span class="cat-dot" style="background:var(--series-1);margin-left:8px"></span>variabel' + (rows.some(function (r) { return r.budget; }) ? ' · Strich = Monatsbudget (einstellbar unter Kategorien)' : '') + '</div>';
+  }
+
+  /** Unterkategorien einer Ausgaben-Zeile (Summe, fix/variabel). */
+  function subSummary(r) {
+    if (!r.items || r.id === '__loans') return '';
+    var by = {};
+    r.items.forEach(function (x) { var k = x.categoryId || r.id; var o = by[k] || (by[k] = { v: 0, f: 0 }); o.v += x.amount; if (x.fixed) o.f += x.amount; });
+    var keys = Object.keys(by);
+    if (keys.length < 2) return '';
+    keys.sort(function (a, b) { return by[b].v - by[a].v; });
+    return '<div class="ov-hist">' + keys.map(function (k) { var c = cat(k); return '<span>' + esc(c && c.parentId ? c.name : 'direkt') + ' <b>' + esc(C.formatMoney(by[k].v)) + '</b>' + (by[k].f ? ' <span class="small" style="color:var(--series-2)">fix ' + esc(C.formatMoney(by[k].f)) + '</span>' : '') + '</span>'; }).join('') + '</div>';
   }
 
   /** Budget einer Hauptkategorie: eigenes Budget oder Summe der Unterkategorie-Budgets. */
@@ -4238,6 +4403,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
         '<label>Notiz</label><input type="text" name="note" value="' + esc(d.note || '') + '">' +
         (tr || sp ? '' : '<label>Tags</label><input type="text" name="tags" value="' + esc((d.tags || []).join(', ')) + '">') +
         (tr || sp ? '' : '<span></span><label class="chk"><input type="checkbox" name="nextMonth"' + (d.nextMonth ? ' checked' : '') + '> Zählt in der Auswertung zum Folgemonat (z. B. Gehalt am Monatsende)</label>') +
+        (tr || sp ? '' : '<span></span><label class="chk" title="Nur für Ausgaben: erscheint in der Übersicht als variabel statt als Fixkosten"><input type="checkbox" name="variable"' + (d.variable ? ' checked' : '') + '> Zählt als variable Ausgabe, nicht als Fixkosten (z. B. Haushaltsgeld)</label>') +
         (isNew ? '' : '<span></span><label class="chk"><input type="checkbox" name="active"' + (d.active ? ' checked' : '') + '> Aktiv</label>') +
         '</div>' + (tr || sp ? '' : App.payeeDatalist('dl-payees-r'));
     }
@@ -4262,6 +4428,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
       d.note = f.note.value.trim();
       d.tags = f.tags ? App.parseTags(f.tags.value) : [];
       d.nextMonth = f.nextMonth ? f.nextMonth.checked : false;
+      d.variable = f.variable ? f.variable.checked : false;
       if (f.active) d.active = f.active.checked;
     }
     function open() {
@@ -4290,6 +4457,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
               categoryId: kind === 'expense' || kind === 'income' ? d.categoryId : null,
               note: d.note, tags: d.tags, unit: d.unit, interval: d.interval,
               nextMonth: (kind === 'income' || kind === 'expense') && d.nextMonth ? true : undefined,
+              variable: kind === 'expense' && d.variable ? true : undefined,
               startDate: d.startDate || d.nextDate, nextDate: d.nextDate, endDate: d.endDate,
               anchorDay: (!origNext || origNext !== d.nextDate || !d.anchorDay) ? C.parts(d.nextDate).d : d.anchorDay,
               mode: d.mode, active: isNew ? true : d.active

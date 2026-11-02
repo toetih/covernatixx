@@ -444,6 +444,7 @@
         '<label>Notiz</label><input type="text" name="note" value="' + esc(d.note || '') + '">' +
         (tr || sp ? '' : '<label>Tags</label><input type="text" name="tags" value="' + esc((d.tags || []).join(', ')) + '">') +
         (tr || sp ? '' : '<span></span><label class="chk"><input type="checkbox" name="nextMonth"' + (d.nextMonth ? ' checked' : '') + '> Zählt in der Auswertung zum Folgemonat (z. B. Gehalt am Monatsende)</label>') +
+        (tr || sp ? '' : '<span></span><label class="chk" title="Nur für Ausgaben: erscheint in der Übersicht als variabel statt als Fixkosten"><input type="checkbox" name="variable"' + (d.variable ? ' checked' : '') + '> Zählt als variable Ausgabe, nicht als Fixkosten (z. B. Haushaltsgeld)</label>') +
         (isNew ? '' : '<span></span><label class="chk"><input type="checkbox" name="active"' + (d.active ? ' checked' : '') + '> Aktiv</label>') +
         '</div>' + (tr || sp ? '' : App.payeeDatalist('dl-payees-r'));
     }
@@ -468,6 +469,7 @@
       d.note = f.note.value.trim();
       d.tags = f.tags ? App.parseTags(f.tags.value) : [];
       d.nextMonth = f.nextMonth ? f.nextMonth.checked : false;
+      d.variable = f.variable ? f.variable.checked : false;
       if (f.active) d.active = f.active.checked;
     }
     function open() {
@@ -496,6 +498,7 @@
               categoryId: kind === 'expense' || kind === 'income' ? d.categoryId : null,
               note: d.note, tags: d.tags, unit: d.unit, interval: d.interval,
               nextMonth: (kind === 'income' || kind === 'expense') && d.nextMonth ? true : undefined,
+              variable: kind === 'expense' && d.variable ? true : undefined,
               startDate: d.startDate || d.nextDate, nextDate: d.nextDate, endDate: d.endDate,
               anchorDay: (!origNext || origNext !== d.nextDate || !d.anchorDay) ? C.parts(d.nextDate).d : d.anchorDay,
               mode: d.mode, active: isNew ? true : d.active

@@ -323,3 +323,18 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
 .split-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; margin-top: 6px; color: var(--muted); }
 .split-legend b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .split-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+/* Übersicht: aufklappbare Zeilen */
+.bar-row.ov { grid-template-columns: 22px 190px 1fr 110px; }
+.ov-toggle { width: 20px; height: 20px; border: 1px solid var(--border-strong, var(--border)); background: var(--surface); color: var(--text); border-radius: 5px; font-size: 13px; line-height: 16px; padding: 0; cursor: pointer; }
+.ov-toggle:hover { background: var(--surface-2); }
+.ov-detail { margin: -2px 0 8px 32px; padding: 8px 10px; border-left: 2px solid var(--border); background: var(--surface-2); border-radius: 0 6px 6px 0; }
+.ov-hist { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; margin-bottom: 6px; }
+.ov-items { width: 100%; table-layout: fixed; }
+.ov-items td { padding: 3px 6px; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-items td:first-child { width: 86px; }
+.ov-items td.num { width: 92px; }
+.ov-items td.fixcol { width: 40px; }
+.kpi.click { cursor: pointer; }
+.kpi.click:hover { border-color: var(--accent, var(--series-1)); }
+.bar-avg { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--muted); opacity: .7; }

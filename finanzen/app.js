@@ -432,6 +432,7 @@
     var mk = C.monthKey(t);
     var inc = rep.income[mk] || 0, exp = rep.expense[mk] || 0;
     var fc = C.forecastBalances(s, t, me);
+    var fcm = C.fixedCostsMonthly(s, t);
     var fcLiquid = 0;
     s.accounts.forEach(function (a) { if (!a.excludeFromNetWorth && App.isCashAccount(a)) fcLiquid += fc[a.id]; });
 
@@ -444,6 +445,7 @@
       kpi('Depots', money(depotHoldValue), depotCost ? 'G/V ' + C.formatMoney(depotHoldValue - depotCost, { sign: true }) + ' (' + C.formatPercent((depotHoldValue - depotCost) / depotCost) + ')' : '&nbsp;') +
       kpi('Einnahmen ' + C.formatMonth(mk), money(inc), '&nbsp;') +
       kpi('Ausgaben ' + C.formatMonth(mk), money(exp), 'Saldo ' + C.formatMoney(inc + exp, { sign: true })) +
+      '<div class="kpi click" data-act="fixed-list" title="Liste anzeigen"><div class="l">Fixkosten / Monat</div><div class="v">' + esc(C.formatMoney(fcm.total)) + '</div><div class="s">Jahresbeiträge verteilt · ' + fcm.items.length + ' Posten ›</div></div>' +
       '</div>';
 
     // Offene Buchungen ohne Kategorie
@@ -489,8 +491,16 @@
 
     // Monat im Überblick: Einnahmen nach Quelle, Ausgaben fix/variabel, Kategorien
     var mb = C.monthBreakdown(s, mk, t);
+    mb.hist = [];
+    for (var hi = 6; hi >= 1; hi--) { var hm = C.monthKey(C.addMonths(mk + '-01', -hi)); mb.hist.push({ m: hm, b: C.monthBreakdown(s, hm, null) }); }
+    // Rest des Monats: variable Ausgaben wie im Schnitt der letzten 6 Monate erwartet (Lebensmittel, Tanken …)
+    // Median statt Mittelwert: ein Urlaubsmonat soll die Erwartung nicht verzerren
+    var vars = mb.hist.map(function (h) { return h.b.expense.variable; }).sort(function (a, b) { return a - b; });
+    var avgVar = Math.round((vars[2] + vars[3]) / 2);
+    mb.expectedVariable = Math.max(0, avgVar - mb.expense.variable);
+    mb.avgVariable = avgVar;
     html += '<div class="card"><div class="card-head"><h2>Einnahmen &amp; Ausgaben ' + esc(C.formatMonth(mk, true)) + '</h2><a class="btn small" href="#auswertung">Auswertung</a></div><div class="card-body">' +
-      monthSplitBars(mb) + '<hr class="sep">' + expenseBars(rep, mk, mb) + '</div></div>';
+      monthSplitBars(mb) + '<hr class="sep"><div class="bold mb">Einnahmen</div>' + incomeList(mb, mk) + '<hr class="sep"><div class="bold mb">Ausgaben</div>' + expenseBars(rep, mk, mb) + '</div></div>';
     html += '</div>';
 
     html += '<div class="grid two" style="margin-top:16px">';
@@ -518,6 +528,11 @@
     if (impIn) impIn.onchange = function () { if (impIn.files.length) App.importFiles(impIn.files); impIn.value = ''; };
     el.onclick = function (e) {
       if (e.target.closest('label.btn')) return;
+      var tg = e.target.closest('[data-ov]');
+      if (tg) { App.ui.ovOpen[tg.dataset.ov] = !App.ui.ovOpen[tg.dataset.ov]; App.render(); return; }
+      var tr = e.target.closest('tr[data-tx]');
+      if (tr) { var tx = C.findById(App.state.transactions, tr.dataset.tx); if (tx) App.editTransaction(tx); return; }
+      if (e.target.closest('[data-act="fixed-list"]')) { fixedCostList(); return; }
       var a = e.target.closest('[data-act],[data-acc],[data-rule]');
       if (!a) return;
       var act = a.dataset.act;
@@ -535,6 +550,19 @@
       if (a.dataset.rule) return App.editRule(C.findById(s.recurring, a.dataset.rule));
     };
   };
+
+  /** Liste der Fixkosten pro Monat (aus Daueraufträgen und Kreditraten). */
+  function fixedCostList() {
+    var s = App.state, f = C.fixedCostsMonthly(s, today());
+    var rhythm = function (r) { var n = r.interval || 1; if (r.unit === 'year') return n === 1 ? 'jährlich' : 'alle ' + n + ' Jahre'; if (r.unit === 'week') return n === 1 ? 'wöchentlich' : 'alle ' + n + ' Wochen'; return n === 1 ? 'monatlich' : n === 3 ? 'vierteljährlich' : n === 6 ? 'halbjährlich' : 'alle ' + n + ' Monate'; };
+    var body = '<p class="help">Aktive Daueraufträge und Kreditraten (ohne Geschäftskonten und als „variabel“ markierte), Jahres- und Quartalsbeiträge auf 12 Monate verteilt. Klick öffnet den Dauerauftrag.</p>' +
+      '<div class="tbl-wrap" style="max-height:60vh"><table class="tbl"><thead><tr><th>Posten</th><th>Rhythmus</th><th class="num">Betrag</th><th class="num">pro Monat</th></tr></thead><tbody>' +
+      f.items.map(function (x) {
+        return '<tr class="click" data-rule="' + x.rule.id + '"><td>' + esc(x.rule.name || x.rule.payee || '') + '<div class="small">' + esc(x.kind === 'loan' ? 'Kreditrate' : (C.categoryPath(s, x.rule.categoryId) || '')) + '</div></td><td class="small">' + esc(rhythm(x.rule)) + '</td><td class="num">' + esc(C.formatMoney(Math.abs(x.rule.amount))) + '</td><td class="num bold">' + esc(C.formatMoney(x.monthly)) + '</td></tr>';
+      }).join('') + '<tr class="sum-row"><td colspan="3">Summe pro Monat</td><td class="num">' + esc(C.formatMoney(f.total)) + '</td></tr></tbody></table></div>';
+    var form = App.modal({ title: 'Fixkosten pro Monat', body: body, wide: true, submitLabel: 'Schließen', onSubmit: function () {} });
+    form.addEventListener('click', function (e) { var r = e.target.closest('[data-rule]'); if (!r) return; var rule = C.findById(App.state.recurring, r.dataset.rule); if (rule) { App.closeModal(); App.editRule(rule); } });
+  }
 
   function kpi(l, v, s) { return '<div class="kpi"><div class="l">' + esc(l) + '</div><div class="v">' + v + '</div><div class="s">' + s + '</div></div>'; }
 
@@ -557,7 +585,7 @@
       segs.push(r);
     }
     var inc = 0; segs.forEach(function (x) { inc += x.actual + x.planned; });
-    var e = mb.expense, out = e.fixed + e.variable + e.plannedFixed;
+    var e = mb.expense, ev = mb.expectedVariable || 0, out = e.fixed + e.variable + e.plannedFixed + (e.plannedVariable || 0) + ev;
     var max = Math.max(inc, out) || 1;
     function bar(parts) {
       return '<div class="split-track">' + parts.map(function (p) {
@@ -577,29 +605,101 @@
     var expParts = [
       { v: e.fixed, color: 'var(--series-2)', title: 'Fixkosten gebucht: ' + C.formatMoney(e.fixed) },
       { v: e.plannedFixed, color: 'var(--series-2)', planned: true, title: 'Fixkosten noch geplant: ' + C.formatMoney(e.plannedFixed) },
-      { v: e.variable, color: 'var(--series-1)', title: 'Variable Ausgaben: ' + C.formatMoney(e.variable) }
+      { v: e.variable, color: 'var(--series-1)', title: 'Variable Ausgaben: ' + C.formatMoney(e.variable) },
+      { v: (e.plannedVariable || 0) + ev, color: 'var(--series-1)', planned: true, title: 'Variabel erwartet bis Monatsende: ' + C.formatMoney((e.plannedVariable || 0) + ev) + ' (typischer Monat der letzten 6: ' + C.formatMoney(mb.avgVariable || 0) + ')' }
     ];
     var saldo = inc - out;
     return '<div class="split-row"><div class="split-head"><span class="bold">Einnahmen</span><span class="bold">' + esc(C.formatMoney(inc)) + '</span></div>' + bar(incParts) +
       legend(segs.map(function (x) { return { label: x.label + (x.planned && !x.actual ? ' (geplant)' : ''), v: x.actual + x.planned, color: x.color, planned: x.planned && !x.actual, title: x.title || (x.transfer ? 'Umbuchung vom Geschäftskonto aufs Privatkonto' : '') }; })) + '</div>' +
       '<div class="split-row"><div class="split-head"><span class="bold">Ausgaben</span><span class="bold">' + esc(C.formatMoney(out)) + '</span></div>' + bar(expParts) +
       legend([{ label: 'Fixkosten', v: e.fixed + e.plannedFixed, color: 'var(--series-2)', title: 'Daueraufträge, Verträge, Kreditraten' + ((e.loans || e.loansPlanned) ? ' (davon Kredite ' + C.formatMoney((e.loans || 0) + (e.loansPlanned || 0)) + ')' : '') + (e.plannedFixed ? ' – ' + C.formatMoney(e.plannedFixed) + ' noch geplant' : '') },
-        { label: 'Variabel', v: e.variable, color: 'var(--series-1)', title: 'alles ohne Dauerauftrag' }]) + '</div>' +
-      '<div class="help">Saldo ' + '<b class="' + (saldo < 0 ? 'neg' : 'pos') + '">' + esc(C.formatMoney(saldo, { sign: true })) + '</b>' + (incPlanned || e.plannedFixed ? ' inkl. noch geplanter Daueraufträge (schraffiert)' : '') +
+        { label: 'Variabel', v: e.variable, color: 'var(--series-1)', title: 'alles ohne Dauerauftrag' },
+        { label: 'variabel erwartet', v: (e.plannedVariable || 0) + ev, color: 'var(--series-1)', planned: true, title: 'Rest bis zu einem typischen Monat (Median der letzten 6: ' + C.formatMoney(mb.avgVariable || 0) + '): Lebensmittel, Tanken, Einkäufe …' }]) + '</div>' +
+      '<div class="help">Saldo ' + '<b class="' + (saldo < 0 ? 'neg' : 'pos') + '">' + esc(C.formatMoney(saldo, { sign: true })) + '</b>' + (incPlanned || e.plannedFixed ? ' inkl. noch geplanter Daueraufträge' : '') + (ev ? ' und erwarteter variabler Ausgaben' : '') + ((incPlanned || e.plannedFixed || ev) ? ' (schraffiert)' : '') +
       ' · Haushaltssicht: ohne Geschäftskonten (Entnahmen von dort zählen als Einnahme), Kreditraten komplett als Fixkosten, Gehalt vom Monatsende zählt zum Folgemonat.</div>';
+  }
+
+  App.ui.ovOpen = App.ui.ovOpen || {};
+  /** Aufklapp-Details: Buchungen (gebucht/geplant) einer Quelle oder Kategorie. */
+  function itemsTable(items, showCat) {
+    if (!items || !items.length) return '<div class="small muted">Keine Buchungen.</div>';
+    var list = items.slice().sort(function (a, b) { return (b.amount - a.amount); });
+    var more = list.length > 15 ? list.length - 15 : 0;
+    return '<table class="tbl ov-items"><tbody>' + list.slice(0, 15).map(function (x) {
+      return '<tr class="' + (x.planned ? 'muted' : '') + (x.id ? ' click" data-tx="' + x.id : '') + '"><td class="nowrap small">' + C.formatDate(x.date) + '</td><td class="ellipsis">' + esc(x.payee || '–') +
+        (showCat && x.categoryId ? ' <span class="small muted">' + esc(C.categoryPath(App.state, x.categoryId)) + '</span>' : '') +
+        (x.planned ? ' <span class="badge">geplant</span>' : '') + (x.fixed === false && showCat !== 'inc' ? '' : '') + '</td>' +
+        (showCat === 'exp' ? '<td class="small fixcol">' + (x.fixed ? '<span class="badge" style="color:var(--series-2)">fix</span>' : '') + '</td>' : '') +
+        '<td class="num nowrap">' + esc(C.formatMoney(x.amount)) + '</td></tr>';
+    }).join('') + (more ? '<tr class="muted"><td colspan="4" class="small">… und ' + more + ' weitere</td></tr>' : '') + '</tbody></table>';
+  }
+  function toggleBtn(key) { return '<button class="ov-toggle" data-ov="' + esc(key) + '" title="Details">' + (App.ui.ovOpen[key] ? '−' : '+') + '</button>'; }
+
+  /** Einnahmen nach Quelle mit Ø der letzten 6 Monate und Aufklapp-Details. */
+  function incomeList(mb, mk) {
+    var s = App.state;
+    if (!mb.sources.length) return '<div class="empty">Keine Einnahmen in diesem Monat.</div>';
+    var hist = mb.hist;
+    // Hauptkategorie mit mehreren Unterkategorien im Zeitraum (z. B. Gehalt: Grundgehalt/Sonderzahlung) → je Unterkategorie, sonst je Hauptkategorie
+    var subsOfMain = {};
+    [mb].concat(hist.map(function (h) { return h.b; })).forEach(function (b) { b.sources.forEach(function (y) { (subsOfMain[y.mainId] = subsOfMain[y.mainId] || {})[y.key] = true; }); });
+    var rowKey = function (y) { return Object.keys(subsOfMain[y.mainId] || {}).length > 1 ? y.key : y.mainId; };
+    var rowLabel = function (y) { return Object.keys(subsOfMain[y.mainId] || {}).length > 1 && !y.transfer ? (C.findById(s.categories, y.key) || {}).name || y.label : y.mainLabel; };
+    function group(b) {
+      var out = {};
+      b.sources.forEach(function (y) {
+        var k = rowKey(y), o = out[k] || (out[k] = { key: k, label: rowLabel(y), color: y.color, actual: 0, planned: 0, transfer: y.transfer, items: [] });
+        o.actual += y.actual; o.planned += y.planned; o.items = o.items.concat(y.items || []);
+      });
+      return out;
+    }
+    var cur = group(mb), histG = hist.map(function (h) { return { m: h.m, g: group(h.b) }; });
+    function histOf(key) { return histG.map(function (h) { return { m: h.m, v: h.g[key] ? h.g[key].actual : 0 }; }); }
+    // Quellen der letzten Monate auch zeigen, wenn diesen Monat (noch) nichts kam – z. B. Entnahmen, Praxis (ab Ø 100 €)
+    var srcList = Object.keys(cur).map(function (k) { return cur[k]; });
+    histG.forEach(function (h) { Object.keys(h.g).forEach(function (k) {
+      if (cur[k] || srcList.some(function (z) { return z.key === k; })) return;
+      var avg = 0; histOf(k).forEach(function (x) { avg += x.v; });
+      if (avg / 6 >= 10000) srcList.push({ key: k, label: h.g[k].label, color: h.g[k].color, actual: 0, planned: 0, transfer: h.g[k].transfer, items: [] });
+    }); });
+    srcList.sort(function (a, b) { return (b.actual + b.planned) - (a.actual + a.planned); });
+    var max = Math.max.apply(null, srcList.map(function (x) { return x.actual + x.planned; })) || 1;
+    return '<div class="bars">' + srcList.map(function (x, i) {
+      var key = 'inc:' + x.key, open = App.ui.ovOpen[key], hs = histOf(x.key), avg = 0;
+      hs.forEach(function (h) { avg += h.v; }); avg = Math.round(avg / hs.length);
+      var col = x.color || 'var(--series-1)';
+      var row = '<div class="bar-row ov">' + toggleBtn(key) + '<span class="name" title="' + esc(x.label) + '"><span class="cat-dot" style="background:' + esc(col) + '"></span>' + esc(x.label) + '</span>' +
+        '<span class="bar-track"><span class="bar-fill" style="position:absolute;left:0;top:0;width:' + (x.actual / max * 100).toFixed(1) + '%;background:' + esc(col) + '"></span>' +
+        (x.planned ? '<span class="bar-fill split-seg planned" style="position:absolute;top:0;left:' + (x.actual / max * 100).toFixed(1) + '%;width:' + (x.planned / max * 100).toFixed(1) + '%;background:' + esc(col) + '"></span>' : '') + '</span>' +
+        '<span class="val">' + esc(C.formatMoney(x.actual + x.planned)) + '<div class="small muted" title="Durchschnitt der letzten 6 Monate">Ø ' + esc(C.formatMoney(avg)) + '</div></span></div>';
+      if (open) {
+        row += '<div class="ov-detail"><div class="ov-hist">' + hs.map(function (h) { return '<span><span class="muted">' + esc(C.formatMonth(h.m)) + '</span> <b>' + esc(C.formatMoney(h.v)) + '</b></span>'; }).join('') + '</div>' +
+          itemsTable(x.items, x.transfer ? null : 'inc') + '</div>';
+      }
+      void i;
+      return row;
+    }).join('') + '</div><div class="help mt">Ø = Durchschnitt der letzten 6 Monate · „+“ zeigt Verlauf und Buchungen.</div>';
   }
 
   function expenseBars(rep, mk, mb) {
     var s = App.state;
     var rows = [];
+    var avgMain = {};
+    if (mb && mb.hist) mb.hist.forEach(function (h) { Object.keys(h.b.byMain).forEach(function (k) { var o = h.b.byMain[k]; avgMain[k] = (avgMain[k] || 0) + (o.fixed + o.variable) / mb.hist.length; }); });
     if (mb) {
       // Haushaltssicht (wie die Balken oben): gebucht + noch geplante Fixkosten, Kreditraten als eigene Zeile
       Object.keys(mb.byMain).forEach(function (mid) {
         var o = mb.byMain[mid], c = mid === '__loans' ? null : cat(mid);
-        var fixed = Math.max(o.fixed + o.plannedFixed, 0), v = fixed + o.variable;
-        if (v <= 0 && !(c && budgetFor(c))) return;
+        var fixed = Math.max(o.fixed + o.plannedFixed, 0), v = fixed + o.variable + (o.plannedVariable || 0);
+        if (v <= 0 && !(c && budgetFor(c)) && !(avgMain[mid] >= 5000)) return;
         rows.push({ id: mid, name: mid === '__loans' ? 'Kreditraten' : (c ? c.name : 'Ohne Kategorie'), color: mid === '__loans' ? 'var(--series-2)' : (c ? c.color : '#999'),
-          v: Math.max(v, 0), fixed: Math.min(fixed, Math.max(v, 0)), planned: o.plannedFixed, budget: c ? budgetFor(c) : 0 });
+          v: Math.max(v, 0), fixed: Math.min(fixed, Math.max(v, 0)), planned: o.plannedFixed + (o.plannedVariable || 0), budget: c ? budgetFor(c) : 0, items: o.items, avg: Math.round(avgMain[mid] || 0) });
+      });
+      // Kategorien, die üblicherweise Ausgaben haben, diesen Monat aber noch nicht (z. B. Lebensmittel am Monatsanfang)
+      Object.keys(avgMain).forEach(function (mid) {
+        if (mb.byMain[mid] || avgMain[mid] < 5000) return;
+        var c = mid === '__loans' ? null : cat(mid);
+        rows.push({ id: mid, name: mid === '__loans' ? 'Kreditraten' : (c ? c.name : 'Ohne Kategorie'), color: c ? c.color : '#999', v: 0, fixed: 0, budget: c ? budgetFor(c) : 0, items: [], avg: Math.round(avgMain[mid]) });
       });
     } else {
       Object.keys(rep.byMain).forEach(function (mid) {
@@ -617,18 +717,32 @@
       }
     });
     if (!rows.length) return '<div class="empty">Diesen Monat noch keine Ausgaben.</div>';
-    rows.sort(function (a, b) { return b.v - a.v; });
-    var max = Math.max.apply(null, rows.map(function (r) { return Math.max(r.v, r.budget); })) || 1;
+    rows.sort(function (a, b) { return (b.v - a.v) || ((b.avg || 0) - (a.avg || 0)); });
+    var max = Math.max.apply(null, rows.map(function (r) { return Math.max(r.v, r.budget, r.avg || 0); })) || 1;
     return '<div class="bars">' + rows.slice(0, 12).map(function (r) {
       var over = r.budget && r.v > r.budget;
       var title = C.formatMoney(r.v) + (r.fixed ? ' (davon fix ' + C.formatMoney(r.fixed) + (r.planned ? ', ' + C.formatMoney(r.planned) + ' noch geplant' : '') + ')' : '') + (r.budget ? ' von ' + C.formatMoney(r.budget) + ' Budget' : '');
-      return '<div class="bar-row" title="' + esc(title) + '"><span class="name"><span class="cat-dot" style="background:' + esc(r.color) + '"></span>' + esc(r.name) + '</span>' +
+      var okey = 'exp:' + r.id;
+      return '<div class="bar-row' + (mb ? ' ov' : '') + '" title="' + esc(title) + '">' + (mb ? toggleBtn(okey) : '') + '<span class="name"><span class="cat-dot" style="background:' + esc(r.color) + '"></span>' + esc(r.name) + '</span>' +
         '<span class="bar-track">' + (r.fixed && !over ? '<span class="bar-fill" style="position:absolute;left:0;top:0;width:' + (r.fixed / max * 100).toFixed(1) + '%;background:var(--series-2)" title="fix ' + esc(C.formatMoney(r.fixed)) + '"></span>' +
           '<span class="bar-fill" style="position:absolute;top:0;left:' + (r.fixed / max * 100).toFixed(1) + '%;width:' + ((r.v - r.fixed) / max * 100).toFixed(1) + '%;background:var(--series-1)"></span>'
           : '<span class="bar-fill" style="display:block;width:' + (r.v / max * 100).toFixed(1) + '%;background:' + (over ? 'var(--neg)' : 'var(--series-1)') + '"></span>') +
-        (r.budget ? '<span class="bar-budget" style="left:' + (r.budget / max * 100).toFixed(1) + '%"></span>' : '') + '</span>' +
-        '<span class="val">' + esc(C.formatMoney(r.v)) + (r.budget ? '<div class="small ' + (over ? 'neg' : 'muted') + '">' + (over ? 'über ' : 'von ') + esc(C.formatMoney(over ? r.v - r.budget : r.budget)) + '</div>' : '') + '</span></div>';
+        (r.budget ? '<span class="bar-budget" style="left:' + (r.budget / max * 100).toFixed(1) + '%"></span>' : '') +
+        (r.avg ? '<span class="bar-avg" style="left:' + (r.avg / max * 100).toFixed(1) + '%" title="Ø 6 Monate ' + esc(C.formatMoney(r.avg)) + '"></span>' : '') + '</span>' +
+        '<span class="val">' + esc(C.formatMoney(r.v)) + (r.budget ? '<div class="small ' + (over ? 'neg' : 'muted') + '">' + (over ? 'über ' : 'von ') + esc(C.formatMoney(over ? r.v - r.budget : r.budget)) + '</div>' : '') + (r.avg ? '<div class="small muted">Ø ' + esc(C.formatMoney(r.avg)) + '</div>' : '') + '</span></div>' +
+        (mb && App.ui.ovOpen[okey] ? '<div class="ov-detail">' + subSummary(r) + itemsTable(r.items, 'exp') + '</div>' : '');
     }).join('') + '</div>' + (rows.length > 12 ? '<div class="help">… und ' + (rows.length - 12) + ' weitere Kategorien</div>' : '') + '<div class="help mt"><span class="cat-dot" style="background:var(--series-2)"></span>fix (inkl. noch geplanter Daueraufträge) <span class="cat-dot" style="background:var(--series-1);margin-left:8px"></span>variabel' + (rows.some(function (r) { return r.budget; }) ? ' · Strich = Monatsbudget (einstellbar unter Kategorien)' : '') + '</div>';
+  }
+
+  /** Unterkategorien einer Ausgaben-Zeile (Summe, fix/variabel). */
+  function subSummary(r) {
+    if (!r.items || r.id === '__loans') return '';
+    var by = {};
+    r.items.forEach(function (x) { var k = x.categoryId || r.id; var o = by[k] || (by[k] = { v: 0, f: 0 }); o.v += x.amount; if (x.fixed) o.f += x.amount; });
+    var keys = Object.keys(by);
+    if (keys.length < 2) return '';
+    keys.sort(function (a, b) { return by[b].v - by[a].v; });
+    return '<div class="ov-hist">' + keys.map(function (k) { var c = cat(k); return '<span>' + esc(c && c.parentId ? c.name : 'direkt') + ' <b>' + esc(C.formatMoney(by[k].v)) + '</b>' + (by[k].f ? ' <span class="small" style="color:var(--series-2)">fix ' + esc(C.formatMoney(by[k].f)) + '</span>' : '') + '</span>'; }).join('') + '</div>';
   }
 
   /** Budget einer Hauptkategorie: eigenes Budget oder Summe der Unterkategorie-Budgets. */

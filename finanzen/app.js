@@ -490,17 +490,22 @@
     html += '</tbody></table></div></div>';
 
     // Monat im Überblick: Einnahmen nach Quelle, Ausgaben fix/variabel, Kategorien
-    var mb = C.monthBreakdown(s, mk, t);
+    // Monat wählbar (‹ ›): aktueller Monat mit Planwerten und Erwartung, vergangene Monate nur gebucht
+    var om = App.ui.ovMonth && App.ui.ovMonth <= mk ? App.ui.ovMonth : mk;
+    var isCur = om === mk;
+    var mb = C.monthBreakdown(s, om, isCur ? t : null);
     mb.hist = [];
-    for (var hi = 6; hi >= 1; hi--) { var hm = C.monthKey(C.addMonths(mk + '-01', -hi)); mb.hist.push({ m: hm, b: C.monthBreakdown(s, hm, null) }); }
-    // Rest des Monats: variable Ausgaben wie im Schnitt der letzten 6 Monate erwartet (Lebensmittel, Tanken …)
+    for (var hi = 6; hi >= 1; hi--) { var hm = C.monthKey(C.addMonths(om + '-01', -hi)); mb.hist.push({ m: hm, b: C.monthBreakdown(s, hm, null) }); }
+    // Rest des Monats: variable Ausgaben wie in einem typischen Monat der letzten 6 erwartet (Lebensmittel, Tanken …)
     // Median statt Mittelwert: ein Urlaubsmonat soll die Erwartung nicht verzerren
     var vars = mb.hist.map(function (h) { return h.b.expense.variable; }).sort(function (a, b) { return a - b; });
     var avgVar = Math.round((vars[2] + vars[3]) / 2);
-    mb.expectedVariable = Math.max(0, avgVar - mb.expense.variable);
+    mb.expectedVariable = isCur ? Math.max(0, avgVar - mb.expense.variable) : 0;
     mb.avgVariable = avgVar;
-    html += '<div class="card"><div class="card-head"><h2>Einnahmen &amp; Ausgaben ' + esc(C.formatMonth(mk, true)) + '</h2><a class="btn small" href="#auswertung">Auswertung</a></div><div class="card-body">' +
-      monthSplitBars(mb) + '<hr class="sep"><div class="bold mb">Einnahmen</div>' + incomeList(mb, mk) + '<hr class="sep"><div class="bold mb">Ausgaben</div>' + expenseBars(rep, mk, mb) + '</div></div>';
+    var prevM = C.monthKey(C.addMonths(om + '-01', -1)), nextM = C.monthKey(C.addMonths(om + '-01', 1));
+    html += '<div class="card"><div class="card-head"><h2 class="row" style="gap:6px"><button class="btn small ghost" data-ovm="' + prevM + '" title="Vormonat">‹</button>Einnahmen &amp; Ausgaben ' + esc(C.formatMonth(om, true)) +
+      (isCur ? '' : '<button class="btn small ghost" data-ovm="' + nextM + '" title="Nächster Monat">›</button><button class="btn small" data-ovm="' + mk + '">aktueller Monat</button>') + '</h2><a class="btn small" href="#auswertung">Auswertung</a></div><div class="card-body">' +
+      monthSplitBars(mb) + '<hr class="sep"><div class="bold mb">Einnahmen</div>' + incomeList(mb, om) + '<hr class="sep"><div class="bold mb">Ausgaben</div>' + expenseBars(rep, om, mb) + '</div></div>';
     html += '</div>';
 
     html += '<div class="grid two" style="margin-top:16px">';
@@ -528,6 +533,8 @@
     if (impIn) impIn.onchange = function () { if (impIn.files.length) App.importFiles(impIn.files); impIn.value = ''; };
     el.onclick = function (e) {
       if (e.target.closest('label.btn')) return;
+      var mv = e.target.closest('[data-ovm]');
+      if (mv) { App.ui.ovMonth = mv.dataset.ovm; App.ui.ovOpen = {}; App.render(); return; }
       var tg = e.target.closest('[data-ov]');
       if (tg) { App.ui.ovOpen[tg.dataset.ov] = !App.ui.ovOpen[tg.dataset.ov]; App.render(); return; }
       var tr = e.target.closest('tr[data-tx]');
@@ -624,8 +631,8 @@
   function itemsTable(items, showCat) {
     if (!items || !items.length) return '<div class="small muted">Keine Buchungen.</div>';
     var list = items.slice().sort(function (a, b) { return (b.amount - a.amount); });
-    var more = list.length > 15 ? list.length - 15 : 0;
-    return '<table class="tbl ov-items"><tbody>' + list.slice(0, 15).map(function (x) {
+    var more = list.length > 30 ? list.length - 30 : 0;
+    return '<table class="tbl ov-items"><tbody>' + list.slice(0, 30).map(function (x) {
       return '<tr class="' + (x.planned ? 'muted' : '') + (x.id ? ' click" data-tx="' + x.id : '') + '"><td class="nowrap small">' + C.formatDate(x.date) + '</td><td class="ellipsis">' + esc(x.payee || '–') +
         (showCat && x.categoryId ? ' <span class="small muted">' + esc(C.categoryPath(App.state, x.categoryId)) + '</span>' : '') +
         (x.planned ? ' <span class="badge">geplant</span>' : '') + (x.fixed === false && showCat !== 'inc' ? '' : '') + '</td>' +
@@ -729,8 +736,17 @@
         (r.budget ? '<span class="bar-budget" style="left:' + (r.budget / max * 100).toFixed(1) + '%"></span>' : '') +
         (r.avg ? '<span class="bar-avg" style="left:' + (r.avg / max * 100).toFixed(1) + '%" title="Ø 6 Monate ' + esc(C.formatMoney(r.avg)) + '"></span>' : '') + '</span>' +
         '<span class="val">' + esc(C.formatMoney(r.v)) + (r.budget ? '<div class="small ' + (over ? 'neg' : 'muted') + '">' + (over ? 'über ' : 'von ') + esc(C.formatMoney(over ? r.v - r.budget : r.budget)) + '</div>' : '') + (r.avg ? '<div class="small muted">Ø ' + esc(C.formatMoney(r.avg)) + '</div>' : '') + '</span></div>' +
-        (mb && App.ui.ovOpen[okey] ? '<div class="ov-detail">' + subSummary(r) + itemsTable(r.items, 'exp') + '</div>' : '');
+        (mb && App.ui.ovOpen[okey] ? '<div class="ov-detail">' + subSummary(r) + payeeSummary(r.items) + itemsTable(r.items, 'exp') + '</div>' : '');
     }).join('') + '</div>' + (rows.length > 12 ? '<div class="help">… und ' + (rows.length - 12) + ' weitere Kategorien</div>' : '') + '<div class="help mt"><span class="cat-dot" style="background:var(--series-2)"></span>fix (inkl. noch geplanter Daueraufträge) <span class="cat-dot" style="background:var(--series-1);margin-left:8px"></span>variabel' + (rows.some(function (r) { return r.budget; }) ? ' · Strich = Monatsbudget (einstellbar unter Kategorien)' : '') + '</div>';
+  }
+
+  /** Wo ging das Geld hin: Empfänger zusammengefasst (z. B. Edeka 9× 412 €). */
+  function payeeSummary(items) {
+    if (!items || items.length < 4) return '';
+    var by = {};
+    items.forEach(function (x) { var k = C.learnKey(x.payee) || (x.payee || '–').toLowerCase(); var o = by[k] || (by[k] = { name: x.payee || '–', n: 0, v: 0 }); o.n++; o.v += x.amount; });
+    var list = Object.keys(by).map(function (k) { return by[k]; }).sort(function (a, b) { return b.v - a.v; });
+    return '<div class="ov-hist" title="nach Empfänger zusammengefasst"><span class="muted">Empfänger:</span>' + list.slice(0, 10).map(function (o) { return '<span>' + esc(o.name) + (o.n > 1 ? ' <span class="muted">' + o.n + '×</span>' : '') + ' <b>' + esc(C.formatMoney(o.v)) + '</b></span>'; }).join('') + (list.length > 10 ? '<span class="muted">+ ' + (list.length - 10) + ' weitere</span>' : '') + '</div>';
   }
 
   /** Unterkategorien einer Ausgaben-Zeile (Summe, fix/variabel). */
